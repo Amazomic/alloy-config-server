@@ -1,0 +1,11 @@
+// Это локальный конфиг самого Alloy: подписка на сервер.
+remotecfg {
+  url            = "http://CONFIG_SERVER:8080"
+  id             = constants.hostname
+  poll_frequency = "30s"
+
+  attributes = {
+    env  = "prod",
+    role = "web",
+  }
+}

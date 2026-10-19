@@ -1,0 +1,96 @@
+// ============ МЕТРИКИ ============
+
+prometheus.exporter.unix "host" { }
+
+prometheus.scrape "metrics" {
+  targets = concat(
+    [{__address__ = "localhost:12345"}],
+    prometheus.exporter.unix.host.targets,
+  )
+  forward_to = [prometheus.relabel.local.receiver]
+}
+
+prometheus.relabel "local" {
+  forward_to = [prometheus.remote_write.mimir.receiver]
+
+  rule {
+    source_labels = ["__address__"]
+    target_label  = "instance"
+    replacement   = coalesce(sys.env("HOST_NAME"), constants.hostname)
+  }
+  rule {
+    target_label = "job"
+    replacement  = coalesce(sys.env("JOB_NAME"), "linux")
+  }
+}
+
+prometheus.remote_write "mimir" {
+  endpoint {
+    url = "http://192.168.20.96:9009/api/v1/push"
+  }
+}
+
+// ============ ЛОГИ: systemd + docker → Loki ============
+
+discovery.relabel "systemd_journal" {
+  targets = []
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "service_name"
+  }
+  rule {
+    target_label = "host"
+    replacement  = coalesce(sys.env("HOST_NAME"), constants.hostname)
+  }
+  rule {
+    target_label = "job"
+    replacement  = coalesce(sys.env("JOB_NAME"), "linux")
+  }
+}
+
+discovery.docker "docker_logs" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+discovery.relabel "docker_logs" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    target_label  = "service_name"
+  }
+  rule {
+    target_label = "host"
+    replacement  = coalesce(sys.env("HOST_NAME"), constants.hostname)
+  }
+}
+
+loki.process "docker_logs" {
+  forward_to = [loki.write.default.receiver]
+
+  stage.docker { }
+}
+
+loki.source.docker "docker_logs" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.docker.docker_logs.targets
+  forward_to       = [loki.process.docker_logs.receiver]
+  relabel_rules    = discovery.relabel.docker_logs.rules
+  refresh_interval = "5s"
+}
+
+loki.source.journal "systemd_journal" {
+  max_age       = "24h0m0s"
+  relabel_rules = discovery.relabel.systemd_journal.rules
+  forward_to    = [loki.write.default.receiver]
+  labels        = {}
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://192.168.20.96:3100/loki/api/v1/push"
+  }
+  external_labels = {}
+}
