@@ -9,11 +9,9 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-`./configs` — шаблоны `*.alloy` (только чтение). `./data` — привязки лейблов (`bindings.json`), чтобы не терялись после рестарта. Логирование по умолчанию: info / text / все GetConfig.
+`./configs` — шаблоны `*.alloy` (только чтение). `./data` — привязки лейблов (`bindings.json`), чтобы не терялись после рестарта.
 
 ## Шаблоны
-
-Одна папка — плоский список файлов:
 
 ```
 configs/
@@ -22,28 +20,23 @@ configs/
   docker.alloy
 ```
 
-Лейблы **не** лежат рядом с файлами. Связь «шаблон → лейблы» хранится на сервере в `DATA_DIR/bindings.json` (volume `./data`), чтобы переживать рестарт. В UI у каждого шаблона есть кнопка «лейблы».
+На каждый шаблон вешается **один** лейбл (`key=value`). Связь хранится в `DATA_DIR/bindings.json`, не рядом с файлами.
 
-- Без привязки шаблон никому не отдаётся.
-- `labels: {}` (пустой набор) — подходит всем Alloy.
-- `env: prod`, `role: [web, api]`, `region: "*"` — точное значение / любое из списка / лейбл должен быть.
-- Alloy получает **все** шаблоны, у которых каждый лейбл совпал с его `attributes` (AND по ключам, OR по значениям), склеенные в порядке имён файлов.
-- Виртуальный лейбл `collector.id` = `id` из `remotecfg` — для привязки к конкретному хосту.
-- Файлы перечитываются на каждый запрос (кэш 1 с). Битые файлы → последняя рабочая версия + предупреждение.
-- Компоненты разных шаблонов не должны иметь одинаковых лейблов (`prometheus.scrape "node"` дважды = ошибка в Alloy).
+- Без лейбла шаблон никому не отдаётся.
+- Alloy получает все шаблоны, чей лейбл есть в его `attributes`, склеенные в один конфиг (порядок — по именам файлов).
+- `value: "*"` — подходит любое значение этого ключа.
+- Виртуальный атрибут `collector.id` = `id` из `remotecfg`.
+- Файлы перечитываются на запрос (кэш 1 с). Битые → последняя рабочая версия + предупреждение.
 
 API:
 
 ```
-PUT  /api/config/{name}/labels   {"labels":{"env":"prod","role":["web","api"]},"description":"..."}
-DELETE /api/config/{name}/labels
-GET  /api/match?env=prod&role=web
+PUT    /api/config/{name}/label   {"key":"collector.os","value":"linux","description":"..."}
+DELETE /api/config/{name}/label
+GET    /api/match?collector.os=linux
 ```
 
 ## Логи
 
-Каждый `GetConfig` — одна строка: `id`, `addr`, `attrs`, выбранные `configs`, `client_hash`/`server_hash`, `result`:
-`initial` · `update_sent` · `synced` · `not_modified`.
-`failed` от Alloy — WARN. `LOG_NOT_MODIFIED=false` убирает шум; `LOG_FORMAT=json` для Loki.
-
-Состояние Alloy (UI, события) — в памяти, сбрасывается при рестарте. Привязки лейблов — на диске в `DATA_DIR`.
+Каждый `GetConfig`: `id`, `attrs`, выбранные `templates`, хэши, `result` (`initial` · `update_sent` · `synced` · `not_modified`).
+Состояние Alloy в UI — в памяти. Привязки лейблов — на диске в `DATA_DIR`.

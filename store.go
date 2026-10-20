@@ -14,72 +14,43 @@ import (
 	"time"
 )
 
-// LabelValues — одно или несколько допустимых значений лейбла.
-// В JSON: "prod" или ["web", "api"].
-type LabelValues []string
-
-func (l *LabelValues) UnmarshalJSON(b []byte) error {
-	var s string
-	if err := json.Unmarshal(b, &s); err == nil {
-		*l = LabelValues{s}
-		return nil
-	}
-	var ss []string
-	if err := json.Unmarshal(b, &ss); err != nil {
-		return err
-	}
-	*l = ss
-	return nil
-}
-
-// Binding — лейблы шаблона, хранятся отдельно от файлов (в DATA_DIR).
+// Binding — один лейбл на шаблон, хранится в DATA_DIR отдельно от файлов.
 type Binding struct {
-	Description string                 `json:"description,omitempty"`
-	Labels      map[string]LabelValues `json:"labels"`
+	Description string `json:"description,omitempty"`
+	Key         string `json:"key"`
+	Value       string `json:"value"` // "*" = любое значение ключа у Alloy
 }
 
 type bindingsFile struct {
 	Templates map[string]Binding `json:"templates"`
 }
 
-// Config — один шаблон: файл *.alloy + опциональная привязка лейблов.
+// Config — один шаблон: файл *.alloy + опциональный лейбл.
 type Config struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	Labels      map[string]LabelValues `json:"labels"`
-	Bound       bool                   `json:"bound"` // есть запись в bindings; без неё шаблон никому не отдаётся
-	Hash        string                 `json:"hash"`
-	Size        int                    `json:"size"`
-	Modified    time.Time              `json:"modified"`
-	Error       string                 `json:"error,omitempty"`
-	Warning     string                 `json:"warning,omitempty"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	LabelKey    string    `json:"label_key,omitempty"`
+	LabelValue  string    `json:"label_value,omitempty"`
+	Bound       bool      `json:"bound"` // есть привязка; без неё шаблон никому не отдаётся
+	Hash        string    `json:"hash"`
+	Size        int       `json:"size"`
+	Modified    time.Time `json:"modified"`
+	Error       string    `json:"error,omitempty"`
+	Warning     string    `json:"warning,omitempty"`
 	content     string
 }
 
-// Matches: шаблон подходит, если он bound, без ошибки, и КАЖДЫЙ его лейбл
-// есть в атрибутах Alloy с одним из значений ("*" = любое).
-// Пустой набор лейблов подходит всем.
+// Matches: шаблон подходит, если у Alloy есть атрибут label_key со значением
+// label_value (или "*" = любое значение этого ключа).
 func (c *Config) Matches(attrs map[string]string) bool {
-	if c.Error != "" || !c.Bound {
+	if c.Error != "" || !c.Bound || c.LabelKey == "" {
 		return false
 	}
-	for k, want := range c.Labels {
-		got, ok := attrs[k]
-		if !ok {
-			return false
-		}
-		hit := false
-		for _, w := range want {
-			if w == "*" || w == got {
-				hit = true
-				break
-			}
-		}
-		if !hit {
-			return false
-		}
+	got, ok := attrs[c.LabelKey]
+	if !ok {
+		return false
 	}
-	return true
+	return c.LabelValue == "*" || c.LabelValue == got
 }
 
 type Store struct {
@@ -121,22 +92,62 @@ func (s *Store) loadBindings() {
 		}
 		return
 	}
-	var bf bindingsFile
-	if err := json.Unmarshal(raw, &bf); err != nil {
+	var wrap struct {
+		Templates map[string]json.RawMessage `json:"templates"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
 		s.log.Error("cannot parse bindings", "file", s.dataFile, "err", err)
 		return
 	}
-	if bf.Templates == nil {
-		bf.Templates = map[string]Binding{}
-	}
-	for name, b := range bf.Templates {
-		if b.Labels == nil {
-			b.Labels = map[string]LabelValues{}
-			bf.Templates[name] = b
+	out := map[string]Binding{}
+	migrated := false
+	for name, chunk := range wrap.Templates {
+		b, fromOld, err := parseBinding(chunk)
+		if err != nil || b.Key == "" {
+			continue
+		}
+		out[name] = b
+		if fromOld {
+			migrated = true
 		}
 	}
-	s.binds = bf.Templates
+	s.binds = out
 	s.log.Info("bindings loaded", "file", s.dataFile, "templates", len(s.binds))
+	if migrated {
+		if err := s.saveBindingsLocked(); err != nil {
+			s.log.Error("cannot rewrite migrated bindings", "err", err)
+		} else {
+			s.log.Info("bindings rewritten to single-label format")
+		}
+	}
+}
+
+// parseBinding принимает {"key","value"} или старый {"labels":{"k":"v"}}.
+func parseBinding(raw []byte) (Binding, bool, error) {
+	var b Binding
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return Binding{}, false, err
+	}
+	if b.Key != "" {
+		if b.Value == "" {
+			b.Value = "*"
+		}
+		return b, false, nil
+	}
+	var old struct {
+		Description string          `json:"description"`
+		Labels      json.RawMessage `json:"labels"`
+	}
+	if err := json.Unmarshal(raw, &old); err != nil || len(old.Labels) == 0 {
+		return Binding{}, false, nil
+	}
+	var asMap map[string]string
+	if err := json.Unmarshal(old.Labels, &asMap); err == nil {
+		for k, v := range asMap {
+			return Binding{Description: old.Description, Key: k, Value: v}, true, nil
+		}
+	}
+	return Binding{}, false, nil
 }
 
 func (s *Store) saveBindingsLocked() error {
@@ -155,22 +166,24 @@ func (s *Store) saveBindingsLocked() error {
 	return os.Rename(tmp, s.dataFile)
 }
 
-// SetBinding сохраняет лейблы шаблона на диск и сбрасывает кэш списка.
+// SetBinding сохраняет один лейбл шаблона на диск и сбрасывает кэш.
 func (s *Store) SetBinding(name string, b Binding) error {
+	b.Key = strings.TrimSpace(b.Key)
+	b.Value = strings.TrimSpace(b.Value)
+	if b.Key == "" || b.Value == "" {
+		return fmt.Errorf("key and value are required")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if b.Labels == nil {
-		b.Labels = map[string]LabelValues{}
-	}
 	if s.binds == nil {
 		s.binds = map[string]Binding{}
 	}
 	s.binds[name] = b
-	s.cfgs = nil // пересканировать с новыми лейблами
+	s.cfgs = nil
 	if err := s.saveBindingsLocked(); err != nil {
 		return err
 	}
-	s.log.Info("binding updated", "template", name, "labels", b.Labels)
+	s.log.Info("binding updated", "template", name, "label", b.Key+"="+b.Value)
 	return nil
 }
 
@@ -206,7 +219,7 @@ func (s *Store) Get(name string) *Config {
 	return nil
 }
 
-// Select возвращает шаблоны, подходящие под атрибуты, в порядке имён.
+// Select возвращает шаблоны, чей лейбл совпал с атрибутами Alloy.
 func (s *Store) Select(attrs map[string]string) []*Config {
 	var out []*Config
 	for _, c := range s.Configs() {
@@ -250,22 +263,19 @@ func (s *Store) scan() []*Config {
 		}
 		tmpl := strings.TrimSuffix(name, ".alloy")
 		c := s.loadFile(tmpl, filepath.Join(s.dir, name))
-		if b, ok := s.binds[tmpl]; ok {
+		if b, ok := s.binds[tmpl]; ok && b.Key != "" {
 			c.Bound = true
-			c.Labels = b.Labels
-			if c.Labels == nil {
-				c.Labels = map[string]LabelValues{}
-			}
+			c.LabelKey = b.Key
+			c.LabelValue = b.Value
 			c.Description = b.Description
-		} else {
-			c.Labels = map[string]LabelValues{}
 		}
 		if c.Error != "" {
 			if g, ok := s.good[tmpl]; ok {
 				stale := *g
 				stale.Warning = c.Error
 				stale.Bound = c.Bound
-				stale.Labels = c.Labels
+				stale.LabelKey = c.LabelKey
+				stale.LabelValue = c.LabelValue
 				stale.Description = c.Description
 				c = &stale
 			}
@@ -303,7 +313,7 @@ func (s *Store) scan() []*Config {
 }
 
 func (s *Store) loadFile(name, path string) *Config {
-	c := &Config{Name: name, Labels: map[string]LabelValues{}}
+	c := &Config{Name: name}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		c.Error = "read: " + err.Error()
