@@ -20,10 +20,18 @@ code,pre,.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--mut)}
 .ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
 .dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
-a,button{color:var(--acc);cursor:pointer;background:none;border:0;padding:0;font:inherit;text-decoration:underline}
-input{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);width:340px;max-width:100%}
+a,button.link{color:var(--acc);cursor:pointer;background:none;border:0;padding:0;font:inherit;text-decoration:underline}
+button.btn{cursor:pointer;font:inherit;padding:5px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg)}
+button.btn.primary{background:var(--acc);color:#fff;border-color:var(--acc)}
+input{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);width:100%;max-width:100%}
+.kv{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 pre{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:10px;overflow:auto;max-height:420px;margin:8px 0}
 .empty{color:var(--mut);padding:10px 0}
+.editor{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+.editor h3{margin:0 0 8px;font-size:14px}
+.editor .row{margin:8px 0}
+.editor .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.hint{color:var(--mut);font-size:12px;margin:4px 0 0}
 </style>
 </head>
 <body>
@@ -33,12 +41,14 @@ pre{background:var(--card);border:1px solid var(--line);border-radius:6px;paddin
 <h2>Alloy (collectors)</h2>
 <div class="wrap"><table id="col"></table></div>
 
-<h2>Pipelines</h2>
+<h2>Шаблоны</h2>
+<div class="sub" style="margin-bottom:8px">На каждый шаблон — один лейбл. Alloy со своими атрибутами получает все совпавшие шаблоны, склеенные в один конфиг.</div>
 <div class="wrap"><table id="cfg"></table></div>
+<div id="edit"></div>
 <div id="view"></div>
 
 <h2>Проверка подписки</h2>
-<input id="q" placeholder="env=prod role=web  — атрибуты Alloy">
+<input id="q" placeholder="collector.os=linux  — атрибуты Alloy" style="max-width:340px">
 <div id="match" class="sub" style="margin-top:8px"></div>
 
 <h2>События</h2>
@@ -49,14 +59,23 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const ago=t=>{if(!t||t.startsWith('0001'))return '—';const s=Math.max(0,(Date.now()-new Date(t))/1000);
   if(s<60)return Math.round(s)+'s ago';if(s<3600)return Math.round(s/60)+'m ago';if(s<86400)return Math.round(s/3600)+'h ago';return Math.round(s/86400)+'d ago'};
-const tags=o=>Object.entries(o||{}).map(([k,v])=>`<span class="tag">${esc(k)}=${esc(Array.isArray(v)?v.join('|'):v)}</span>`).join('')||'<span class="sub">—</span>';
+const tags=o=>Object.entries(o||{}).map(([k,v])=>`<span class="tag">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="sub">—</span>';
 const evColor={initial:'ok',synced:'ok',update_sent:'warn',status:'warn',register:'',unregister:''};
+
+let editing=null;      // имя шаблона, для которого открыт редактор лейбла
+let edState=null;      // состояние полей ввода (не теряем при фоновом refresh)
+let edFocus=null;      // id focused поля + позиция выделения
+let lastServer=null;   // последний снимок данных с сервера для сравнения
+
+// Снимок лейбла из ответа сервера
+const snapOf=c=>({bound:!!c.bound,key:c.label_key??'',value:c.label_value??'',desc:c.description??''});
+const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 
 async function load(){
   const st=await (await fetch('/api/state')).json();
   const cols=st.collectors||[], cfgs=st.configs||[], evs=st.events||[];
 
-  $('col').innerHTML=cols.length?`<tr><th>id</th><th>атрибуты</th><th>pipelines</th><th>хэш (alloy → сервер)</th><th>статус</th><th>last seen</th><th>last synced</th><th>polls</th></tr>`+
+  $('col').innerHTML=cols.length?`<tr><th>id</th><th>атрибуты</th><th>шаблоны</th><th>хэш (alloy → сервер)</th><th>статус</th><th>last seen</th><th>last synced</th><th>polls</th></tr>`+
     cols.map(c=>{
       const age=(Date.now()-new Date(c.last_seen))/1000, cls=!c.registered&&c.polls===0?'warn':age<300?'ok':age<1800?'warn':'bad';
       const inSync=c.client_hash===c.server_hash;
@@ -67,24 +86,124 @@ async function load(){
       <td>${ago(c.last_seen)}</td><td>${ago(c.last_synced)}</td><td>${c.polls}</td></tr>`}).join('')
     :'<tr><td class="empty">Пока ни один Alloy не обращался</td></tr>';
 
-  $('cfg').innerHTML=cfgs.length?`<tr><th>имя</th><th>лейблы (подписка)</th><th>файлы</th><th>размер</th><th>хэш</th><th>изменён</th><th>Alloy</th></tr>`+
+  $('cfg').innerHTML=cfgs.length?`<tr><th>имя</th><th>лейбл</th><th>размер</th><th>хэш</th><th>изменён</th><th></th></tr>`+
     cfgs.map(c=>{
       const n=cols.filter(x=>(x.configs||[]).includes(c.name)).length;
-      return `<tr><td><b>${esc(c.name)}</b><div class="sub">${esc(c.description)}</div>${c.error?`<div class="bad">⚠ отключён: ${esc(c.error)}</div>`:''}${c.warning?`<div class="warn">⚠ файлы битые, отдаётся последняя рабочая версия: ${esc(c.warning)}</div>`:''}</td>
-      <td>${Object.keys(c.labels||{}).length?tags(c.labels):'<span class="tag">все Alloy</span>'}</td>
-      <td class="mono">${(c.files||[]).map(esc).join('<br>')}</td><td>${c.size} B</td><td class="mono">${esc(c.hash)}</td><td>${ago(c.modified)}</td>
-      <td>${n} · <a onclick="show('${esc(c.name)}')">показать</a></td></tr>`}).join('')
-    :'<tr><td class="empty">В папке нет конфигов</td></tr>';
+      const lab=c.bound
+        ?`<span class="tag">${esc(c.label_key)}=${esc(c.label_value)}</span>`
+        :'<span class="warn">нет привязки</span>';
+      return `<tr><td><b>${esc(c.name)}</b>${c.description?`<div class="sub">${esc(c.description)}</div>`:''}${c.error?`<div class="bad">⚠ ${esc(c.error)}</div>`:''}${c.warning?`<div class="warn">⚠ ${esc(c.warning)}</div>`:''}</td>
+      <td>${lab}</td><td>${c.size} B</td><td class="mono">${esc(c.hash)}</td><td>${ago(c.modified)}</td>
+      <td>${n} Alloy · <button class="link" onclick="show('${esc(c.name)}')">показать</button> · <button class="link" onclick="editLabel('${esc(c.name)}')">лейбл</button></td></tr>`}).join('')
+    :'<tr><td class="empty">В папке нет *.alloy</td></tr>';
 
   $('ev').innerHTML=evs.length?`<tr><th>время</th><th>тип</th><th>alloy</th><th>сообщение</th></tr>`+
     evs.slice(0,100).map(e=>`<tr><td class="mono" title="${esc(e.time)}">${new Date(e.time).toLocaleTimeString()}</td><td class="${evColor[e.type]||''}">${esc(e.type)}</td><td>${esc(e.collector)}</td><td class="mono">${esc(e.message)}</td></tr>`).join('')
     :'<tr><td class="empty">Событий нет</td></tr>';
   $('upd').textContent='обновлено '+new Date().toLocaleTimeString();
+
+  if(editing){
+    const c=cfgs.find(x=>x.name===editing);
+    // Перерисовываем редактор только если данные на сервере реально изменились.
+    // Иначе DOM остаётся нетронутым — фокус, выделение и набранный текст сохраняются.
+    if(c&&!same(lastServer,snapOf(c)))renderEditor(c);
+  }
 }
 
 async function show(name){
   const t=await (await fetch('/api/config/'+encodeURIComponent(name))).text();
-  $('view').innerHTML=`<pre>${esc(t)}</pre><button onclick="document.getElementById('view').innerHTML=''">закрыть</button>`;
+  $('view').innerHTML=`<pre>${esc(t)}</pre><button class="link" onclick="document.getElementById('view').innerHTML=''">закрыть</button>`;
+}
+
+async function editLabel(name){
+  editing=name;
+  edState=null;   // свежее открытие — черновика нет
+  const st=await (await fetch('/api/state')).json();
+  const c=(st.configs||[]).find(x=>x.name===name);
+  if(!c){closeEditor();return}
+  renderEditor(c);
+}
+
+function closeEditor(){
+  editing=null;edState=null;edFocus=null;lastServer=null;
+  $('edit').innerHTML='';
+}
+
+// Запоминаем фокус/выделение и текущий черновик перед любой перерисовкой DOM.
+function captureEditor(){
+  if(!$('edit').firstChild)return;
+  edState={key:$('ed-key')?.value??'',value:$('ed-value')?.value??'',desc:$('ed-desc')?.value??''};
+  const a=document.activeElement;
+  if(a&&a.closest('#edit')&&a.id){
+    try{edFocus={id:a.id,start:a.selectionStart,end:a.selectionEnd}}catch(e){edFocus=null}
+  }else edFocus=null;
+}
+
+function restoreEditor(){
+  for(const id of ['ed-desc','ed-key','ed-value']){
+    const el=$(id);
+    if(el&&edState)el.value={ 'ed-desc':edState.desc,'ed-key':edState.key,'ed-value':edState.value }[id];
+  }
+  if(edFocus){
+    const el=$(edFocus.id);
+    if(el){el.focus();try{el.setSelectionRange(edFocus.start,edFocus.end)}catch(e){}}
+  }
+}
+
+function renderEditor(c){
+  captureEditor();
+  // Черновик пользователя в приоритете: серверные данные подставляем только если
+  // пользователь ещё ничего не менял в этой форме.
+  const draft=edState&&!same(edState,{key:c.label_key??'',value:c.label_value??'',desc:c.description??''})?edState:null;
+  const v=draft??{key:c.label_key??'',value:c.label_value??'',desc:c.description??''};
+  $('edit').innerHTML=`<div class="editor">
+    <h3>Лейбл: ${esc(c.name)}</h3>
+    <div class="row"><label class="sub" for="ed-desc">описание</label>
+      <input id="ed-desc" value="${esc(v.desc)}" placeholder="необязательно"></div>
+    <div class="row"><label class="sub">один лейбл</label>
+      <div class="kv">
+        <input id="ed-key" value="${esc(v.key)}" placeholder="ключ, напр. collector.os">
+        <input id="ed-value" value="${esc(v.value)}" placeholder="значение, напр. linux (* = любое)">
+      </div>
+      <div class="hint">Если у Alloy есть такой атрибут — шаблон попадёт в его конфиг вместе с остальными совпадениями</div></div>
+    <div class="actions">
+      <button class="btn primary" id="ed-save">сохранить</button>
+      ${c.bound?`<button class="btn" id="ed-clear">снять</button>`:''}
+      <button class="btn" id="ed-cancel">закрыть</button>
+      <span id="ed-msg" class="sub"></span>
+    </div>
+  </div>`;
+  lastServer=snapOf(c);
+  // Синхронизируем состояние формы с фактическим содержимым полей.
+  const sync=()=>{edState={key:$('ed-key').value,value:$('ed-value').value,desc:$('ed-desc').value}};
+  for(const id of ['ed-desc','ed-key','ed-value'])$(id).addEventListener('input',sync);
+  sync();
+  restoreEditor();
+  $('ed-cancel').onclick=closeEditor;
+  $('ed-save').onclick=async()=>{
+    const msg=$('ed-msg');
+    try{
+      const key=$('ed-key').value.trim(), value=$('ed-value').value.trim();
+      if(!key||!value)throw new Error('нужны ключ и значение');
+      const r=await fetch('/api/config/'+encodeURIComponent(c.name)+'/label',{
+        method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({description:$('ed-desc').value.trim(),key,value})
+      });
+      if(!r.ok)throw new Error(await r.text());
+      msg.textContent='сохранено';msg.className='sub ok';
+      // После успешного сохранения черновик больше не нужен — данные на сервере обновятся.
+      edState=null;
+      await load();
+    }catch(e){msg.textContent=e.message;msg.className='sub bad'}
+  };
+  const clr=$('ed-clear');
+  if(clr)clr.onclick=async()=>{
+    if(!confirm('Снять лейбл с '+c.name+'?'))return;
+    const r=await fetch('/api/config/'+encodeURIComponent(c.name)+'/label',{method:'DELETE'});
+    if(!r.ok){$('ed-msg').textContent=await r.text();$('ed-msg').className='sub bad';return}
+    edState=null;
+    await load();
+  };
 }
 
 $('q').addEventListener('input',async e=>{
@@ -92,10 +211,22 @@ $('q').addEventListener('input',async e=>{
   e.target.value.split(/[\s,]+/).filter(x=>x.includes('=')).forEach(x=>{const i=x.indexOf('=');p.set(x.slice(0,i),x.slice(i+1))});
   if(![...p].length){$('match').textContent='';return}
   const r=await (await fetch('/api/match?'+p)).json();
-  $('match').innerHTML=r.configs.length?'получит: '+r.configs.map(n=>`<span class="tag">${esc(n)}</span>`).join('')+` <span class="mono">${esc(r.hash)}</span>`:'<span class="bad">ни один pipeline не подходит</span>';
+  $('match').innerHTML=r.configs.length?'получит: '+r.configs.map(n=>`<span class="tag">${esc(n)}</span>`).join('')+` <span class="mono">${esc(r.hash)}</span>`:'<span class="bad">ни один шаблон не подходит</span>';
 });
 
-load();setInterval(()=>load().catch(()=>{}),3000);
+// Фоновое обновление таблиц. Пока пользователь печатает в любом поле ввода
+// (редактор лейбла или строка проверки), перерисовку DOM откладываем —
+// иначе innerHTML сбрасывает фокус, выделение и набранный текст.
+let pendingRefresh=false;
+async function autoLoad(){
+  const a=document.activeElement;
+  if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA')){pendingRefresh=true;return}
+  pendingRefresh=false;
+  await load();
+}
+document.addEventListener('focusout',()=>{if(pendingRefresh){pendingRefresh=false;load().catch(()=>{})}});
+
+load();setInterval(()=>autoLoad().catch(()=>{}),3000);
 </script>
 </body>
 </html>

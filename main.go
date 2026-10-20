@@ -37,10 +37,11 @@ func main() {
 	log := slog.New(h)
 
 	dir := env("CONFIG_DIR", "/configs")
+	dataDir := env("DATA_DIR", "/data")
 	addr := env("LISTEN_ADDR", ":8080")
 	logIdle := !strings.EqualFold(env("LOG_NOT_MODIFIED", "true"), "false")
 
-	store := NewStore(dir, time.Second, log)
+	store := NewStore(dir, dataDir, time.Second, log)
 	srv := NewServer(store, log, logIdle)
 
 	mux := http.NewServeMux()
@@ -56,7 +57,13 @@ func main() {
 	}
 
 	cfgs := store.Configs()
-	log.Info("started", "listen", addr, "config_dir", dir, "pipelines", len(cfgs))
+	bound := 0
+	for _, c := range cfgs {
+		if c.Bound {
+			bound++
+		}
+	}
+	log.Info("started", "listen", addr, "config_dir", dir, "data_dir", dataDir, "templates", len(cfgs), "bound", bound)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

@@ -1,43 +1,42 @@
 # alloy-config-server
 
-Минимальный remote config сервер для Grafana Alloy (`remotecfg`). Один контейнер, один порт (RPC + UI), без авторизации и редактирования.
+Минимальный remote config сервер для Grafana Alloy (`remotecfg`). Один контейнер, один порт (RPC + UI), без авторизации.
 
 ```bash
 docker compose up -d --build
-# UI:  http://localhost:8080
-# Alloy: remotecfg { url = "http://<host>:8080" }   (см. alloy-example.alloy)
+# UI:  http://localhost:8081
+# Alloy: remotecfg { url = "http://<host>:8081" }   (см. alloy-example.alloy)
 docker compose logs -f
 ```
 
-## Конфиги
+`./configs` — шаблоны `*.alloy` (только чтение). `./data` — привязки лейблов (`bindings.json`), чтобы не терялись после рестарта.
+
+## Шаблоны
 
 ```
 configs/
-  10-base/        config.alloy, labels.yaml   # labels: {}  → всем Alloy
-  20-web-prod/    nginx.alloy,  labels.yaml   # env=prod, role∈{web,api}
-  30-db-prod/     config.alloy, labels.yaml   # env=*, role=db
+  logs.alloy
+  metrics.alloy
+  docker.alloy
 ```
 
-Одна папка = один pipeline (все `*.alloy` внутри склеиваются). `labels.yaml`:
+На каждый шаблон вешается **один** лейбл (`key=value`). Связь хранится в `DATA_DIR/bindings.json`, не рядом с файлами.
 
-```yaml
-description: необязательно
-labels:
-  env: prod            # точное значение
-  role: [web, api]     # любое из списка
-  region: "*"          # лейбл должен быть, значение любое
+- Без лейбла шаблон никому не отдаётся.
+- Alloy получает все шаблоны, чей лейбл есть в его `attributes`, склеенные в один конфиг (порядок — по именам файлов).
+- `value: "*"` — подходит любое значение этого ключа.
+- Виртуальный атрибут `collector.id` = `id` из `remotecfg`.
+- Файлы перечитываются на запрос (кэш 1 с). Битые → последняя рабочая версия + предупреждение.
+
+API:
+
 ```
-
-- Alloy получает **все** pipelines, у которых каждый лейбл совпал с его `attributes` (AND по ключам, OR по значениям), склеенные в порядке имён папок. Нумеруйте префиксом (`10-`, `20-`).
-- Нет `labels.yaml` → pipeline отключён. `labels: {}` → подходит всем.
-- Виртуальный лейбл `collector.id` = `id` из `remotecfg` — для привязки к конкретному хосту.
-- Файлы перечитываются на каждый запрос (кэш 1 с), перезапуск не нужен. Если файлы стали битыми, отдаётся последняя рабочая версия + предупреждение в логе и UI.
-- Компоненты разных pipelines не должны иметь одинаковых лейблов (`prometheus.scrape "node"` дважды = ошибка в Alloy).
+PUT    /api/config/{name}/label   {"key":"collector.os","value":"linux","description":"..."}
+DELETE /api/config/{name}/label
+GET    /api/match?collector.os=linux
+```
 
 ## Логи
 
-Каждый `GetConfig` — одна строка: `id`, `addr`, `attrs`, выбранные `configs`, `client_hash`/`server_hash`, `result`:
-`initial` (первый конфиг) · `update_sent` (отдали новый) · `synced` (Alloy вернулся с новым хэшем = применил) · `not_modified`.
-`failed` статус от Alloy — WARN с текстом ошибки. `LOG_NOT_MODIFIED=false` убирает шум от обычных опросов; `LOG_FORMAT=json` для Loki.
-
-Состояние Alloy (UI, события) хранится в памяти и сбрасывается при рестарте.
+Каждый `GetConfig`: `id`, `attrs`, выбранные `templates`, хэши, `result` (`initial` · `update_sent` · `synced` · `not_modified`).
+Состояние Alloy в UI — в памяти. Привязки лейблов — на диске в `DATA_DIR`.
