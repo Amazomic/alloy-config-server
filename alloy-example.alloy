@@ -1,4 +1,6 @@
 // Это локальный конфиг самого Alloy: подписка на сервер.
+// Атрибуты ниже — то, с чем сервер сопоставляет имена файлов в ./configs:
+// файл "os=linux.alloy" придёт сюда, потому что есть атрибут os = "linux".
 remotecfg {
   url            = "http://CONFIG_SERVER:8080"
   id             = constants.hostname
@@ -7,5 +9,6 @@ remotecfg {
   attributes = {
     env  = "prod",
     role = "web",
+    os   = "linux",
   }
 }

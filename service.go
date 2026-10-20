@@ -174,7 +174,7 @@ func (s *Server) GetConfig(ctx context.Context, req *connect.Request[collectorv1
 	args := []any{
 		"id", m.Id, "addr", addr, "result", result,
 		"client_hash", short(m.Hash), "server_hash", short(hash),
-		"templates", names, "attrs", attrs,
+		"configs", names, "attrs", attrs,
 	}
 	if status != "" {
 		args = append(args, "alloy_status", status)
@@ -190,7 +190,7 @@ func (s *Server) GetConfig(ctx context.Context, req *connect.Request[collectorv1
 		s.log.Info("GetConfig", args...)
 	}
 	if len(cfgs) == 0 && result != "not_modified" {
-		s.log.Warn("no template matched this alloy", "id", m.Id, "attrs", attrs)
+		s.log.Warn("no config matched this alloy", "id", m.Id, "attrs", attrs)
 	}
 
 	resp := &collectorv1.GetConfigResponse{Hash: hash, NotModified: notModified}

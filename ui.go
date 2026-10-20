@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"net/http"
-	"strings"
 )
 
 //go:embed web/index.html
@@ -27,6 +26,7 @@ func (s *Server) registerUI(mux *http.ServeMux) {
 		})
 	})
 
+	// GET /api/config/{name} — текст конфига. Имя — условие целиком, напр. "os=linux".
 	mux.HandleFunc("GET /api/config/{name}", func(w http.ResponseWriter, r *http.Request) {
 		c := s.store.Get(r.PathValue("name"))
 		if c == nil {
@@ -37,47 +37,7 @@ func (s *Server) registerUI(mux *http.ServeMux) {
 		w.Write([]byte(c.content))
 	})
 
-	// PUT /api/config/{name}/label — один лейбл на шаблон.
-	// Body: {"key":"collector.os","value":"linux","description":"..."}
-	mux.HandleFunc("PUT /api/config/{name}/label", func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
-		if s.store.Get(name) == nil {
-			http.NotFound(w, r)
-			return
-		}
-		var body struct {
-			Description string `json:"description"`
-			Key         string `json:"key"`
-			Value       string `json:"value"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if strings.TrimSpace(body.Key) == "" || strings.TrimSpace(body.Value) == "" {
-			http.Error(w, "key and value are required", http.StatusBadRequest)
-			return
-		}
-		if err := s.store.SetBinding(name, Binding{Description: body.Description, Key: body.Key, Value: body.Value}); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		writeJSON(w, s.store.Get(name))
-	})
-
-	mux.HandleFunc("DELETE /api/config/{name}/label", func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
-		if s.store.Get(name) == nil {
-			http.NotFound(w, r)
-			return
-		}
-		if err := s.store.DeleteBinding(name); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, s.store.Get(name))
-	})
-
+	// GET /api/match?os=linux — что получит Alloy с такими атрибутами.
 	mux.HandleFunc("GET /api/match", func(w http.ResponseWriter, r *http.Request) {
 		attrs := map[string]string{}
 		for k, v := range r.URL.Query() {

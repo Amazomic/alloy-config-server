@@ -9,34 +9,43 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-`./configs` — шаблоны `*.alloy` (только чтение). `./data` — привязки лейблов (`bindings.json`), чтобы не терялись после рестарта.
+`./configs` — конфиги `*.alloy` (только чтение). Никаких БД и привязок: **имя файла и есть условие выдачи**.
 
-## Шаблоны
+## Как это работает
+
+Атрибуты из `remotecfg.attributes` (плюс виртуальный `id` = `id` collector'а) сопоставляются с именами файлов:
+
+| Имя файла | Кто получит |
+|---|---|
+| `os=linux.alloy` | Alloy, у которого в attributes есть `os = "linux"` |
+| `env=*.alloy` | любой Alloy, у которого вообще есть атрибут `env` |
+| `id=node-1.alloy` | только Alloy с `id = "node-1"` (персональный конфиг) |
+| `*.alloy` | всем без исключения (базовый конфиг, склеивается первым) |
+
+- Чтобы отдать конфигурационный файл какому-то Alloy — добавь нужный атрибут ему в `remotecfg.attributes`; имя файла уже содержит условие.
+- Формат имени: `<ключ>=<значение>.alloy`, где ключ — имя атрибута (без префиксов). Файлы без `=` (кроме `*`) игнорируются с предупреждением в логе.
+- Alloy получает **все** совпавшие файлы, склеенные в один конфиг (порядок — по именам файлов, `*` первым).
+- Файлы перечитываются на запрос (кэш 1 с). Битые → последняя рабочая версия + предупреждение.
+
+Пример:
 
 ```
 configs/
-  logs.alloy
-  metrics.alloy
-  docker.alloy
+  *.alloy               // база для всех
+  os=linux.alloy        // linux-хосты
+  role=web.alloy        // веб-ноды
+  id=canary-01.alloy    // персональный конфиг одного collector'а
 ```
-
-На каждый шаблон вешается **один** лейбл (`key=value`). Связь хранится в `DATA_DIR/bindings.json`, не рядом с файлами.
-
-- Без лейбла шаблон никому не отдаётся.
-- Alloy получает все шаблоны, чей лейбл есть в его `attributes`, склеенные в один конфиг (порядок — по именам файлов).
-- `value: "*"` — подходит любое значение этого ключа.
-- Виртуальный атрибут `collector.id` = `id` из `remotecfg`.
-- Файлы перечитываются на запрос (кэш 1 с). Битые → последняя рабочая версия + предупреждение.
 
 API:
 
 ```
-PUT    /api/config/{name}/label   {"key":"collector.os","value":"linux","description":"..."}
-DELETE /api/config/{name}/label
-GET    /api/match?collector.os=linux
+GET    /api/state                 // конфиги, collectors, события
+GET    /api/config/{name}         // текст конфига (name = "os=linux")
+GET    /api/match?os=linux&role=web   // что получит Alloy с такими атрибутами
 ```
 
 ## Логи
 
-Каждый `GetConfig`: `id`, `attrs`, выбранные `templates`, хэши, `result` (`initial` · `update_sent` · `synced` · `not_modified`).
-Состояние Alloy в UI — в памяти. Привязки лейблов — на диске в `DATA_DIR`.
+Каждый `GetConfig`: `id`, `attrs`, выбранные `configs`, хэши, `result` (`initial` · `update_sent` · `synced` · `not_modified`).
+Состояние Alloy в UI — в памяти. Всё состояние конфигов — в именах и содержимом файлов в `CONFIG_DIR`.
