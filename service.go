@@ -81,9 +81,10 @@ func effectiveAttrs(id string, local, deprecated map[string]string) map[string]s
 	for k, v := range src {
 		out[k] = v
 	}
-	// Виртуальный лейбл: позволяет привязать конфиг к конкретному Alloy по id.
-	if _, ok := out["collector.id"]; !ok {
-		out["collector.id"] = id
+	// Виртуальный атрибут: файл "id_<collector id>.alloy" привязывает
+	// конфиг к конкретному Alloy.
+	if _, ok := out["id"]; !ok {
+		out["id"] = id
 	}
 	return out
 }

@@ -42,12 +42,12 @@ pre{background:var(--card);border:1px solid var(--line);border-radius:6px;paddin
 <div class="wrap"><table id="col"></table></div>
 
 <h2>Конфиги</h2>
-<div class="sub" style="margin-bottom:8px">Имя файла = условие выдачи. <code>key=value.alloy</code> получат Alloy, у которых в атрибутах есть <code>key=value</code>; <code>*.alloy</code> — всем; <code>collector.id=&lt;id&gt;.alloy</code> — конкретному Alloy.</div>
+<div class="sub" style="margin-bottom:8px">Имя файла = одна метка <code>&lt;ключ&gt;_&lt;значение&gt;.alloy</code>: его получат Alloy, у которых в атрибутах есть <code>ключ=значение</code> (например <code>env_prod.alloy</code> → <code>env="prod"</code>). <code>*.alloy</code> — всем; <code>id_&lt;id&gt;.alloy</code> — конкретному Alloy.</div>
 <div class="wrap"><table id="cfg"></table></div>
 <div id="view"></div>
 
 <h2>Проверка подписки</h2>
-<input id="q" placeholder="os=linux  — атрибуты Alloy" style="max-width:340px">
+<input id="q" placeholder="env_prod  os_linux  — метки-атрибуты Alloy" style="max-width:340px">
 <div id="match" class="sub" style="margin-top:8px"></div>
 
 <h2>События</h2>

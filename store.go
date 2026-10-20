@@ -14,18 +14,22 @@ import (
 )
 
 // Модель работы: имя конфигурационного файла — это и есть условие выдачи.
+// Разделитель — нижнее подчёркивание (никаких «=» в именах файлов):
 //
-//	<key>=<value>.alloy   → отдаём тем Alloy, у кого в attributes есть key=value
-//	collector.id=<id>.alloy → персональный конфиг конкретного Alloy
-//	*.alloy                → всем без исключения
+//	env_prod.alloy    → лейбл env со значением prod: отдаём тем Alloy,
+//	                    у кого в attributes есть env="prod"
+//	id_node-1.alloy   → персональный конфиг Alloy с id="node-1"
+//	*.alloy           → всем без исключения
 //
-// Атрибуты формируются из local_attributes запроса remotecfg (+ виртуальный
-// collector.id). Никаких bindings.json и лейблов в UI — всё в именах файлов.
+// У каждого файла ровно одна такая метка: <ключ>_<значение>.alloy.
+// Первый "_" разделяет ключ и значение; значение может содержать дефисы
+// и точки, но не подчёркивания. Атрибуты формируются из local_attributes
+// запроса remotecfg (+ виртуальный id collector'а).
 
 // Config — один файл-конфиг с разобранным из имени условием.
 type Config struct {
-	Name     string    `json:"name"`  // базовое имя без .alloy, напр. "collector.os=linux"
-	Label    string    `json:"label"` // условие целиком: "key=value", "key=*", "*"
+	Name     string    `json:"name"`  // базовое имя без .alloy, напр. "env_prod"
+	Label    string    `json:"label"` // условие целиком (== Name): "<key>_<value>" или "*"
 	Key      string    `json:"key,omitempty"`
 	Value    string    `json:"value,omitempty"`
 	Always   bool      `json:"always"` // "*": подходит всем
@@ -37,8 +41,8 @@ type Config struct {
 	content  string
 }
 
-// Matches: файлу с "key=value" нужен атрибут key со значением value
-// ("*" = любое значение ключа); "*" совпадает всегда.
+// Matches: файлу с "<key>_<value>" нужен атрибут key со значением value;
+// "*" совпадает всегда.
 func (c *Config) Matches(attrs map[string]string) bool {
 	if c.Error != "" {
 		return false
@@ -47,18 +51,16 @@ func (c *Config) Matches(attrs map[string]string) bool {
 		return true
 	}
 	got, ok := attrs[c.Key]
-	if !ok {
-		return false
-	}
-	return c.Value == "*" || c.Value == got
+	return ok && c.Value == got
 }
 
-// parseName разбирает базовое имя файла: "key=value" или "*".
+// parseName разбирает базовое имя файла: "<key>_<value>" или "*".
+// Ровно одна метка: первый "_" разделяет ключ и значение.
 func parseName(name string) (key, value string, always bool, ok bool) {
 	if name == "*" {
 		return "", "", true, true
 	}
-	i := strings.Index(name, "=")
+	i := strings.Index(name, "_")
 	if i <= 0 || i == len(name)-1 {
 		return "", "", false, false
 	}
@@ -149,7 +151,7 @@ func (s *Store) scan() []*Config {
 		name := strings.TrimSuffix(fname, ".alloy")
 		key, value, always, ok := parseName(name)
 		if !ok {
-			s.warnOnce(name, "bad filename: expected \"key=value.alloy\" or \"*.alloy\"")
+			s.warnOnce(name, "bad filename: expected \"<key>_<value>.alloy\" or \"*.alloy\"")
 			continue
 		}
 		c := s.loadFile(name, key, value, always, filepath.Join(s.dir, fname))

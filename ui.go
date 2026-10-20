@@ -26,7 +26,7 @@ func (s *Server) registerUI(mux *http.ServeMux) {
 		})
 	})
 
-	// GET /api/config/{name} — текст конфига. Имя — условие целиком, напр. "os=linux".
+	// GET /api/config/{name} — текст конфига. Имя — метка целиком, напр. "env_prod".
 	mux.HandleFunc("GET /api/config/{name}", func(w http.ResponseWriter, r *http.Request) {
 		c := s.store.Get(r.PathValue("name"))
 		if c == nil {
@@ -37,7 +37,7 @@ func (s *Server) registerUI(mux *http.ServeMux) {
 		w.Write([]byte(c.content))
 	})
 
-	// GET /api/match?os=linux — что получит Alloy с такими атрибутами.
+	// GET /api/match?env=prod — что получит Alloy с такими атрибутами.
 	mux.HandleFunc("GET /api/match", func(w http.ResponseWriter, r *http.Request) {
 		attrs := map[string]string{}
 		for k, v := range r.URL.Query() {
