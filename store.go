@@ -3,8 +3,8 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,55 +12,55 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 // LabelValues — одно или несколько допустимых значений лейбла.
-// В YAML: `env: prod` или `role: [web, api]`.
+// В JSON: "prod" или ["web", "api"].
 type LabelValues []string
 
-func (l *LabelValues) UnmarshalYAML(n *yaml.Node) error {
-	switch n.Kind {
-	case yaml.ScalarNode:
-		*l = LabelValues{n.Value}
-	case yaml.SequenceNode:
-		for _, c := range n.Content {
-			if c.Kind != yaml.ScalarNode {
-				return fmt.Errorf("line %d: label values must be scalars", c.Line)
-			}
-			*l = append(*l, c.Value)
-		}
-	default:
-		return fmt.Errorf("line %d: label value must be a string or a list of strings", n.Line)
+func (l *LabelValues) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*l = LabelValues{s}
+		return nil
 	}
+	var ss []string
+	if err := json.Unmarshal(b, &ss); err != nil {
+		return err
+	}
+	*l = ss
 	return nil
 }
 
-type labelsFile struct {
-	Description string                 `yaml:"description"`
-	Labels      map[string]LabelValues `yaml:"labels"`
+// Binding — лейблы шаблона, хранятся отдельно от файлов (в DATA_DIR).
+type Binding struct {
+	Description string                 `json:"description,omitempty"`
+	Labels      map[string]LabelValues `json:"labels"`
 }
 
-// Config — один pipeline: папка с *.alloy файлами и labels.yaml.
+type bindingsFile struct {
+	Templates map[string]Binding `json:"templates"`
+}
+
+// Config — один шаблон: файл *.alloy + опциональная привязка лейблов.
 type Config struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
 	Labels      map[string]LabelValues `json:"labels"`
-	Files       []string               `json:"files"`
+	Bound       bool                   `json:"bound"` // есть запись в bindings; без неё шаблон никому не отдаётся
 	Hash        string                 `json:"hash"`
 	Size        int                    `json:"size"`
 	Modified    time.Time              `json:"modified"`
-	Error       string                 `json:"error,omitempty"`   // если задано — конфиг отключён
-	Warning     string                 `json:"warning,omitempty"` // файлы сейчас битые, отдаётся последняя рабочая версия
+	Error       string                 `json:"error,omitempty"`
+	Warning     string                 `json:"warning,omitempty"`
 	content     string
 }
 
-// Matches: конфиг подходит, если КАЖДЫЙ его лейбл присутствует в атрибутах
-// Alloy с одним из перечисленных значений ("*" = любое значение).
-// Пустой набор лейблов (`labels: {}`) подходит всем.
+// Matches: шаблон подходит, если он bound, без ошибки, и КАЖДЫЙ его лейбл
+// есть в атрибутах Alloy с одним из значений ("*" = любое).
+// Пустой набор лейблов подходит всем.
 func (c *Config) Matches(attrs map[string]string) bool {
-	if c.Error != "" {
+	if c.Error != "" || !c.Bound {
 		return false
 	}
 	for k, want := range c.Labels {
@@ -83,23 +83,110 @@ func (c *Config) Matches(attrs map[string]string) bool {
 }
 
 type Store struct {
-	dir string
-	ttl time.Duration
-	log *slog.Logger
+	dir      string
+	dataFile string
+	ttl      time.Duration
+	log      *slog.Logger
 
 	mu      sync.Mutex
 	at      time.Time
 	cfgs    []*Config
-	lastErr map[string]string  // чтобы не спамить одной и той же ошибкой
-	good    map[string]*Config // последняя валидная версия каждого конфига
+	binds   map[string]Binding
+	lastErr map[string]string
+	good    map[string]*Config
 }
 
-func NewStore(dir string, ttl time.Duration, log *slog.Logger) *Store {
-	return &Store{dir: dir, ttl: ttl, log: log, lastErr: map[string]string{}, good: map[string]*Config{}}
+func NewStore(dir, dataDir string, ttl time.Duration, log *slog.Logger) *Store {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		log.Error("cannot create data dir", "dir", dataDir, "err", err)
+	}
+	s := &Store{
+		dir:      dir,
+		dataFile: filepath.Join(dataDir, "bindings.json"),
+		ttl:      ttl,
+		log:      log,
+		binds:    map[string]Binding{},
+		lastErr:  map[string]string{},
+		good:     map[string]*Config{},
+	}
+	s.loadBindings()
+	return s
 }
 
-// Configs возвращает актуальный список. Папка перечитывается не чаще раза в ttl —
-// без fsnotify, потому что он ненадёжен на bind-mount'ах и сетевых ФС.
+func (s *Store) loadBindings() {
+	raw, err := os.ReadFile(s.dataFile)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			s.log.Error("cannot read bindings", "file", s.dataFile, "err", err)
+		}
+		return
+	}
+	var bf bindingsFile
+	if err := json.Unmarshal(raw, &bf); err != nil {
+		s.log.Error("cannot parse bindings", "file", s.dataFile, "err", err)
+		return
+	}
+	if bf.Templates == nil {
+		bf.Templates = map[string]Binding{}
+	}
+	for name, b := range bf.Templates {
+		if b.Labels == nil {
+			b.Labels = map[string]LabelValues{}
+			bf.Templates[name] = b
+		}
+	}
+	s.binds = bf.Templates
+	s.log.Info("bindings loaded", "file", s.dataFile, "templates", len(s.binds))
+}
+
+func (s *Store) saveBindingsLocked() error {
+	bf := bindingsFile{Templates: s.binds}
+	if bf.Templates == nil {
+		bf.Templates = map[string]Binding{}
+	}
+	raw, err := json.MarshalIndent(bf, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := s.dataFile + ".tmp"
+	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.dataFile)
+}
+
+// SetBinding сохраняет лейблы шаблона на диск и сбрасывает кэш списка.
+func (s *Store) SetBinding(name string, b Binding) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if b.Labels == nil {
+		b.Labels = map[string]LabelValues{}
+	}
+	if s.binds == nil {
+		s.binds = map[string]Binding{}
+	}
+	s.binds[name] = b
+	s.cfgs = nil // пересканировать с новыми лейблами
+	if err := s.saveBindingsLocked(); err != nil {
+		return err
+	}
+	s.log.Info("binding updated", "template", name, "labels", b.Labels)
+	return nil
+}
+
+// DeleteBinding убирает привязку — шаблон перестаёт отдаваться кому-либо.
+func (s *Store) DeleteBinding(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.binds, name)
+	s.cfgs = nil
+	if err := s.saveBindingsLocked(); err != nil {
+		return err
+	}
+	s.log.Info("binding removed", "template", name)
+	return nil
+}
+
 func (s *Store) Configs() []*Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -119,7 +206,7 @@ func (s *Store) Get(name string) *Config {
 	return nil
 }
 
-// Select возвращает конфиги, подходящие под атрибуты, в порядке имён папок.
+// Select возвращает шаблоны, подходящие под атрибуты, в порядке имён.
 func (s *Store) Select(attrs map[string]string) []*Config {
 	var out []*Config
 	for _, c := range s.Configs() {
@@ -130,11 +217,11 @@ func (s *Store) Select(attrs map[string]string) []*Config {
 	return out
 }
 
-// Merge склеивает выбранные конфиги в один текст (Alloy принимает ровно один) и считает хэш.
+// Merge склеивает выбранные шаблоны в один текст и считает хэш.
 func Merge(cfgs []*Config) (content, hash string) {
 	var b strings.Builder
 	for _, c := range cfgs {
-		fmt.Fprintf(&b, "// ===== pipeline: %s =====\n%s\n", c.Name, c.content)
+		fmt.Fprintf(&b, "// ===== %s =====\n%s\n", c.Name, c.content)
 	}
 	content = b.String()
 	return content, sha(content)
@@ -155,37 +242,49 @@ func (s *Store) scan() []*Config {
 	seen := map[string]bool{}
 	for _, e := range entries {
 		name := e.Name()
-		if strings.HasPrefix(name, ".") {
+		if strings.HasPrefix(name, ".") || e.IsDir() {
 			continue
 		}
-		dir := filepath.Join(s.dir, name)
-		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() { // Stat следует за симлинками (k8s ConfigMap)
+		if !strings.HasSuffix(name, ".alloy") {
 			continue
 		}
-		c := s.load(name, dir)
+		tmpl := strings.TrimSuffix(name, ".alloy")
+		c := s.loadFile(tmpl, filepath.Join(s.dir, name))
+		if b, ok := s.binds[tmpl]; ok {
+			c.Bound = true
+			c.Labels = b.Labels
+			if c.Labels == nil {
+				c.Labels = map[string]LabelValues{}
+			}
+			c.Description = b.Description
+		} else {
+			c.Labels = map[string]LabelValues{}
+		}
 		if c.Error != "" {
-			// Битый/недописанный файл не должен убирать pipeline у работающих Alloy.
-			if g, ok := s.good[name]; ok {
+			if g, ok := s.good[tmpl]; ok {
 				stale := *g
 				stale.Warning = c.Error
+				stale.Bound = c.Bound
+				stale.Labels = c.Labels
+				stale.Description = c.Description
 				c = &stale
 			}
 		} else {
-			s.good[name] = c
+			s.good[tmpl] = c
 		}
-		seen[name] = true
+		seen[tmpl] = true
 		out = append(out, c)
 
 		problem := c.Error + c.Warning
-		if prev := s.lastErr[name]; prev != problem {
-			s.lastErr[name] = problem
+		if prev := s.lastErr[tmpl]; prev != problem {
+			s.lastErr[tmpl] = problem
 			switch {
 			case c.Warning != "":
-				s.log.Warn("config is broken, serving last good version", "config", name, "reason", c.Warning)
+				s.log.Warn("template is broken, serving last good version", "template", tmpl, "reason", c.Warning)
 			case c.Error != "":
-				s.log.Warn("config disabled", "config", name, "reason", c.Error)
+				s.log.Warn("template unreadable", "template", tmpl, "reason", c.Error)
 			default:
-				s.log.Info("config is valid again", "config", name)
+				s.log.Info("template is valid again", "template", tmpl)
 			}
 		}
 	}
@@ -203,52 +302,18 @@ func (s *Store) scan() []*Config {
 	return out
 }
 
-func (s *Store) load(name, dir string) *Config {
-	c := &Config{Name: name, Labels: map[string]LabelValues{}, Files: []string{}}
-
-	files, _ := filepath.Glob(filepath.Join(dir, "*.alloy"))
-	sort.Strings(files)
-	var b strings.Builder
-	for _, f := range files {
-		data, err := os.ReadFile(f)
-		if err != nil {
-			c.Error = "read " + filepath.Base(f) + ": " + err.Error()
-			return c
-		}
-		if fi, err := os.Stat(f); err == nil && fi.ModTime().After(c.Modified) {
-			c.Modified = fi.ModTime()
-		}
-		c.Files = append(c.Files, filepath.Base(f))
-		b.WriteString(strings.TrimRight(string(data), "\n"))
-		b.WriteString("\n")
+func (s *Store) loadFile(name, path string) *Config {
+	c := &Config{Name: name, Labels: map[string]LabelValues{}}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		c.Error = "read: " + err.Error()
+		return c
 	}
-	c.content = b.String()
+	if fi, err := os.Stat(path); err == nil {
+		c.Modified = fi.ModTime()
+	}
+	c.content = strings.TrimRight(string(data), "\n") + "\n"
 	c.Size = len(c.content)
 	c.Hash = sha(c.content)[:12]
-
-	if len(files) == 0 {
-		c.Error = "no *.alloy files"
-		return c
-	}
-
-	raw, err := os.ReadFile(filepath.Join(dir, "labels.yaml"))
-	if err != nil {
-		c.Error = "labels.yaml is missing (use `labels: {}` to match every Alloy)"
-		return c
-	}
-	var lf labelsFile
-	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
-	dec.KnownFields(true)
-	if err := dec.Decode(&lf); err == io.EOF {
-		c.Error = "labels.yaml is empty (use `labels: {}` to match every Alloy)"
-		return c
-	} else if err != nil {
-		c.Error = "labels.yaml: " + err.Error()
-		return c
-	}
-	if lf.Labels != nil {
-		c.Labels = lf.Labels
-	}
-	c.Description = lf.Description
 	return c
 }

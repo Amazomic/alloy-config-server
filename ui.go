@@ -26,7 +26,6 @@ func (s *Server) registerUI(mux *http.ServeMux) {
 		})
 	})
 
-	// Исходник конкретного pipeline.
 	mux.HandleFunc("GET /api/config/{name}", func(w http.ResponseWriter, r *http.Request) {
 		c := s.store.Get(r.PathValue("name"))
 		if c == nil {
@@ -37,7 +36,47 @@ func (s *Server) registerUI(mux *http.ServeMux) {
 		w.Write([]byte(c.content))
 	})
 
-	// Проверка подписки: /api/match?env=prod&role=web — какие конфиги получит такой Alloy.
+	// PUT /api/config/{name}/labels — повесить/обновить лейблы шаблона.
+	// Body: {"labels":{"env":"prod","role":["web","api"]},"description":"..."}
+	// Пустой labels {} — подходит всем Alloy. DELETE снимает привязку.
+	mux.HandleFunc("PUT /api/config/{name}/labels", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		if s.store.Get(name) == nil {
+			http.NotFound(w, r)
+			return
+		}
+		var body struct {
+			Description string                 `json:"description"`
+			Labels      map[string]LabelValues `json:"labels"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if body.Labels == nil {
+			http.Error(w, `labels required (use {} to match every Alloy)`, http.StatusBadRequest)
+			return
+		}
+		if err := s.store.SetBinding(name, Binding{Description: body.Description, Labels: body.Labels}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, s.store.Get(name))
+	})
+
+	mux.HandleFunc("DELETE /api/config/{name}/labels", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		if s.store.Get(name) == nil {
+			http.NotFound(w, r)
+			return
+		}
+		if err := s.store.DeleteBinding(name); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, s.store.Get(name))
+	})
+
 	mux.HandleFunc("GET /api/match", func(w http.ResponseWriter, r *http.Request) {
 		attrs := map[string]string{}
 		for k, v := range r.URL.Query() {

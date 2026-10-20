@@ -1,3 +1,0 @@
-description: Метрики и логи linux-хоста (systemd + docker)
-labels:
-  collector.os: linux
