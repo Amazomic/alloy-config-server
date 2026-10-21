@@ -1,2 +1,18 @@
 bin/
 data/
+
+# Go build and test artifacts
+*.exe
+*.test
+*.out
+coverage.txt
+
+# Local environment and logs
+.env
+.env.*
+!.env.example
+*.log
+
+# Operating system metadata
+.DS_Store
+Thumbs.db

@@ -30,6 +30,7 @@ type Collector struct {
 	Configs    []string          `json:"configs"`
 	Status     string            `json:"status,omitempty"`
 	StatusErr  string            `json:"status_error,omitempty"`
+	configContent string
 }
 
 type Event struct {
@@ -70,6 +71,16 @@ func (s *Server) get(id string) *Collector { // под s.mu
 		s.collectors[id] = c
 	}
 	return c
+}
+
+func (s *Server) collectorConfig(id string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.collectors[id]
+	if !ok || c.Polls == 0 {
+		return "", false
+	}
+	return c.configContent, true
 }
 
 func effectiveAttrs(id string, local, deprecated map[string]string) map[string]string {
@@ -120,7 +131,7 @@ func (s *Server) GetConfig(ctx context.Context, req *connect.Request[collectorv1
 	}
 	attrs := effectiveAttrs(m.Id, m.LocalAttributes, m.Attributes)
 	cfgs := s.store.Select(attrs)
-	content, hash := Merge(cfgs)
+	content, hash := MergeForAttributes(cfgs, attrs)
 	names := make([]string, len(cfgs))
 	for i, c := range cfgs {
 		names[i] = c.Name
@@ -140,6 +151,7 @@ func (s *Server) GetConfig(ctx context.Context, req *connect.Request[collectorv1
 	c.ClientHash = m.Hash
 	c.ServerHash = hash
 	c.Configs = names
+	c.configContent = content
 	if status != "" {
 		c.Status, c.StatusErr = status, statusErr
 	}

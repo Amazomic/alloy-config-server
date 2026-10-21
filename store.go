@@ -13,52 +13,43 @@ import (
 	"time"
 )
 
-// Модель работы: имя конфигурационного файла — это и есть условие выдачи.
-// Разделитель — нижнее подчёркивание (никаких «=» в именах файлов):
-//
-//	env_prod.alloy    → лейбл env со значением prod: отдаём тем Alloy,
-//	                    у кого в attributes есть env="prod"
-//	id_node-1.alloy   → персональный конфиг Alloy с id="node-1"
-//	*.alloy           → всем без исключения
-//
-// У каждого файла ровно одна такая метка: <ключ>_<значение>.alloy.
-// Первый "_" разделяет ключ и значение; значение может содержать дефисы
-// и точки, но не подчёркивания. Атрибуты формируются из local_attributes
-// запроса remotecfg (+ виртуальный id collector'а).
-
-// Config — один файл-конфиг с разобранным из имени условием.
+// Config — один файл-конфиг с селектором атрибутов.
 type Config struct {
-	Name     string    `json:"name"`  // базовое имя без .alloy, напр. "env_prod"
-	Label    string    `json:"label"` // условие целиком (== Name): "<key>_<value>" или "*"
-	Key      string    `json:"key,omitempty"`
-	Value    string    `json:"value,omitempty"`
-	Always   bool      `json:"always"` // "*": подходит всем
-	Hash     string    `json:"hash"`
-	Size     int       `json:"size"`
-	Modified time.Time `json:"modified"`
-	Error    string    `json:"error,omitempty"`
-	Warning  string    `json:"warning,omitempty"`
+	Name     string            `json:"name"`
+	Label    string            `json:"label"`
+	Selector map[string]string `json:"selector"`
+	Key      string            `json:"key,omitempty"`
+	Value    string            `json:"value,omitempty"`
+	Always   bool              `json:"always"`
+	Hash     string            `json:"hash"`
+	Size     int               `json:"size"`
+	Modified time.Time         `json:"modified"`
+	Error    string            `json:"error,omitempty"`
+	Warning  string            `json:"warning,omitempty"`
 	content  string
 }
 
-// Matches: файлу с "<key>_<value>" нужен атрибут key со значением value;
-// "*" совпадает всегда.
+// Matches requires every selector attribute to match; additional collector
+// attributes do not prevent a match. An empty selector matches every collector.
 func (c *Config) Matches(attrs map[string]string) bool {
 	if c.Error != "" {
 		return false
 	}
-	if c.Always {
-		return true
+	for key, value := range c.Selector {
+		if got, ok := attrs[key]; !ok || got != value {
+			return false
+		}
 	}
-	got, ok := attrs[c.Key]
-	return ok && c.Value == got
+	return true
 }
 
-// parseName разбирает базовое имя файла: "<key>_<value>" или "*".
-// Ровно одна метка: первый "_" разделяет ключ и значение.
+// parseName reads selectors from "<key>=<value>" or legacy "<key>_<value>" names.
 func parseName(name string) (key, value string, always bool, ok bool) {
 	if name == "*" {
 		return "", "", true, true
+	}
+	if i := strings.Index(name, "="); i > 0 && i < len(name)-1 {
+		return name[:i], name[i+1:], false, true
 	}
 	i := strings.Index(name, "_")
 	if i <= 0 || i == len(name)-1 {
@@ -108,8 +99,8 @@ func (s *Store) Get(name string) *Config {
 	return nil
 }
 
-// Select возвращает конфиги, чьё условие из имени совпало с атрибутами Alloy.
-// Порядок — по именам файлов; "*" идёт первым, чтобы базовый конфиг был в начале.
+// Select returns configs whose selectors match the collector attributes.
+// Configs with empty selectors come first, followed by name-sorted configs.
 func (s *Store) Select(attrs map[string]string) []*Config {
 	var out []*Config
 	for _, c := range s.Configs() {
@@ -122,12 +113,37 @@ func (s *Store) Select(attrs map[string]string) []*Config {
 
 // Merge склеивает выбранные конфиги в один текст и считает хэш.
 func Merge(cfgs []*Config) (content, hash string) {
+	return MergeForAttributes(cfgs, nil)
+}
+
+// MergeForAttributes renders collector-specific placeholders before hashing
+// the merged config so every collector receives a matching content hash.
+func MergeForAttributes(cfgs []*Config, attrs map[string]string) (content, hash string) {
 	var b strings.Builder
+	id := attrs["id"]
+	if id != "" {
+		id = escapeHCLString(id)
+	}
 	for _, c := range cfgs {
-		fmt.Fprintf(&b, "// ===== %s =====\n%s\n", c.Name, c.content)
+		configContent := c.content
+		if id != "" {
+			configContent = strings.ReplaceAll(configContent, "{{id}}", id)
+			configContent = strings.ReplaceAll(configContent, "stand.190", id)
+		}
+		fmt.Fprintf(&b, "// ===== %s =====\n%s\n", c.Name, configContent)
 	}
 	content = b.String()
 	return content, sha(content)
+}
+
+func escapeHCLString(value string) string {
+	return strings.NewReplacer(
+		"\\", "\\\\",
+		"\"", "\\\"",
+		"\n", "\\n",
+		"\r", "\\r",
+		"\t", "\\t",
+	).Replace(value)
 }
 
 func sha(s string) string {
@@ -149,12 +165,7 @@ func (s *Store) scan() []*Config {
 			continue
 		}
 		name := strings.TrimSuffix(fname, ".alloy")
-		key, value, always, ok := parseName(name)
-		if !ok {
-			s.warnOnce(name, "bad filename: expected \"<key>_<value>.alloy\" or \"*.alloy\"")
-			continue
-		}
-		c := s.loadFile(name, key, value, always, filepath.Join(s.dir, fname))
+		c := s.loadFile(name, filepath.Join(s.dir, fname))
 		if c.Error != "" {
 			if g, ok := s.good[name]; ok {
 				stale := *g
@@ -192,23 +203,31 @@ func (s *Store) scan() []*Config {
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Always != out[j].Always {
-			return out[i].Always // "*" первым
+			return out[i].Always
 		}
 		return out[i].Name < out[j].Name
 	})
 	return out
 }
 
-func (s *Store) warnOnce(name, msg string) {
-	if prev := s.lastErr[name]; prev == msg {
-		return
+func (s *Store) loadFile(name, path string) *Config {
+	c := &Config{Name: name, Label: name}
+	if key, value, always, ok := parseName(name); ok {
+		if !always {
+			c.Selector = map[string]string{key: value}
+		} else {
+			c.Selector = map[string]string{}
+		}
+	} else {
+		c.Error = "invalid config filename: expected \"<key>=<value>.alloy\", legacy \"<key>_<value>.alloy\", or \"*.alloy\""
+		return c
 	}
-	s.lastErr[name] = msg
-	s.log.Warn("skipping file", "name", name, "reason", msg)
-}
-
-func (s *Store) loadFile(name, key, value string, always bool, path string) *Config {
-	c := &Config{Name: name, Label: name, Key: key, Value: value, Always: always}
+	c.Always = len(c.Selector) == 0
+	if len(c.Selector) == 1 {
+		for key, value := range c.Selector {
+			c.Key, c.Value = key, value
+		}
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		c.Error = "read: " + err.Error()

@@ -1,0 +1,151 @@
+// --- ЭКСПОРТЕРЫ (ЦЕЛЕВЫЕ СИСТЕМЫ) ---
+
+otelcol.exporter.otlphttp "mimir" {
+  client {
+    endpoint = "http://mimir:8080/otlp"
+    tls {
+      insecure = true
+    }
+  }
+}
+
+otelcol.exporter.otlphttp "loki" {
+  client {
+    endpoint = "http://loki:3100/otlp"
+    compression = "gzip"
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}
+
+// --- ПРИЁМНИКИ (ВХОДНЫЕ ДАННЫЕ ОТ АГЕНТОВ И ЛОКАЛЬНЫХ СЕРВИСОВ) ---
+
+otelcol.receiver.otlp "main_new" {
+  http {
+    endpoint = "0.0.0.0:10051"
+  }
+
+  output {
+    metrics = [otelcol.exporter.otlphttp.mimir.input]
+    traces  = [otelcol.exporter.otlp.tempo.input]
+    logs    = [otelcol.exporter.otlphttp.loki.input]
+  }
+}
+
+// --- СБОР МЕТРИК (ЛОКАЛЬНО) ---
+
+prometheus.exporter.unix "host" { }
+
+prometheus.exporter.cadvisor "local" {
+  docker_host            = "unix:///var/run/docker.sock"
+  storage_duration       = "2m"
+  store_container_labels = true
+}
+
+prometheus.scrape "metrics" {
+  targets = array.concat(
+    array.concat(
+      [{__address__ = "localhost:12345"}],
+      prometheus.exporter.unix.host.targets,
+    ),
+    prometheus.exporter.cadvisor.local.targets,
+  )
+  forward_to = [prometheus.relabel.local.receiver]
+}
+
+prometheus.relabel "local" {
+  forward_to = [otelcol.receiver.prometheus.metrics_in.receiver]
+
+  rule {
+    source_labels = ["name"]
+    regex         = "/?(.+)"
+    target_label  = "container_name"
+    replacement   = "$1"
+  }
+  rule {
+    source_labels = ["__address__"]
+    target_label  = "instance"
+    replacement   = "{{id}}"
+  }
+  rule {
+    target_label = "job"
+    replacement  = "prod_metrics"
+  }
+}
+
+otelcol.receiver.prometheus "metrics_in" {
+  output {
+    metrics = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  output {
+    metrics = [otelcol.exporter.otlphttp.mimir.input]
+  }
+}
+
+// --- СБОР ЛОГОВ (ЛОКАЛЬНО DOCKER) ---
+
+
+discovery.docker "docker_logs" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+discovery.relabel "docker_logs" {
+  targets = discovery.docker.docker_logs.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container_name"
+  }
+
+  rule {
+    target_label = "host"
+    replacement  = "{{id}}"
+  }
+}
+
+loki.source.docker "docker_logs" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.docker_logs.output
+  labels     = {}
+  forward_to = [otelcol.receiver.loki.logs_in.receiver]
+}
+
+otelcol.receiver.loki "logs_in" {
+  output {
+    logs = [otelcol.processor.transform.to_resource.input]
+  }
+}
+
+otelcol.processor.transform "to_resource" {
+  error_mode = "ignore"
+
+  log_statements {
+    context = "log"
+    statements = [
+      "set(resource.attributes[\"container_name\"], log.attributes[\"container_name\"])",
+      "set(resource.attributes[\"host\"], log.attributes[\"host\"])",
+    ]
+  }
+
+  output {
+    logs = [otelcol.processor.batch.logs_default.input]
+  }
+}
+
+otelcol.processor.batch "logs_default" {
+  output {
+    logs = [otelcol.exporter.otlphttp.loki.input]
+  }
+}

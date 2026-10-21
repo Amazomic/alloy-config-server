@@ -1,53 +1,52 @@
-// ============ МЕТРИКИ ============
+
+// ================= Метрики =================
 
 prometheus.exporter.unix "host" { }
+
+prometheus.exporter.cadvisor "local" {
+  docker_host            = "unix:///var/run/docker.sock"
+  storage_duration       = "2m"
+  store_container_labels = true
+}
 
 prometheus.scrape "metrics" {
   targets = concat(
     [{__address__ = "localhost:12345"}],
     prometheus.exporter.unix.host.targets,
+    prometheus.exporter.cadvisor.local.targets,
   )
   forward_to = [prometheus.relabel.local.receiver]
 }
 
 prometheus.relabel "local" {
-  forward_to = [prometheus.remote_write.mimir.receiver]
+  forward_to = [
+    otelcol.receiver.prometheus.metrics_in.receiver,
+  ]
 
   rule {
     source_labels = ["__address__"]
     target_label  = "instance"
-    replacement   = coalesce(sys.env("HOST_NAME"), constants.hostname)
+    replacement   = "{{id}}"
   }
   rule {
     target_label = "job"
-    replacement  = coalesce(sys.env("JOB_NAME"), "linux")
+    replacement  = "prod_metrics"
   }
 }
 
-prometheus.remote_write "mimir" {
-  endpoint {
-    url = "http://192.168.20.96:9009/api/v1/push"
+otelcol.receiver.prometheus "metrics_in" {
+  output {
+    metrics = [otelcol.processor.batch.default.input]
   }
 }
 
-// ============ ЛОГИ: systemd + docker → Loki ============
-
-discovery.relabel "systemd_journal" {
-  targets = []
-
-  rule {
-    source_labels = ["__journal__systemd_unit"]
-    target_label  = "service_name"
-  }
-  rule {
-    target_label = "host"
-    replacement  = coalesce(sys.env("HOST_NAME"), constants.hostname)
-  }
-  rule {
-    target_label = "job"
-    replacement  = coalesce(sys.env("JOB_NAME"), "linux")
+otelcol.processor.batch "default" {
+  output {
+    metrics = [otelcol.exporter.otlphttp.otlp_out.input]
   }
 }
+
+// ================= Логи =================
 
 discovery.docker "docker_logs" {
   host             = "unix:///var/run/docker.sock"
@@ -55,42 +54,61 @@ discovery.docker "docker_logs" {
 }
 
 discovery.relabel "docker_logs" {
-  targets = []
+  targets = discovery.docker.docker_logs.targets
 
   rule {
     source_labels = ["__meta_docker_container_name"]
-    target_label  = "service_name"
+    regex         = "/(.*)"
+    target_label  = "container_name"
   }
+
   rule {
     target_label = "host"
-    replacement  = coalesce(sys.env("HOST_NAME"), constants.hostname)
+    replacement  = "{{id}}"
   }
-}
-
-loki.process "docker_logs" {
-  forward_to = [loki.write.default.receiver]
-
-  stage.docker { }
 }
 
 loki.source.docker "docker_logs" {
-  host             = "unix:///var/run/docker.sock"
-  targets          = discovery.docker.docker_logs.targets
-  forward_to       = [loki.process.docker_logs.receiver]
-  relabel_rules    = discovery.relabel.docker_logs.rules
-  refresh_interval = "5s"
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.docker_logs.output
+  labels     = {}
+  forward_to = [loki.process.multiline.receiver]
 }
 
-loki.source.journal "systemd_journal" {
-  max_age       = "24h0m0s"
-  relabel_rules = discovery.relabel.systemd_journal.rules
-  forward_to    = [loki.write.default.receiver]
-  labels        = {}
-}
+loki.process "multiline" {
+  forward_to = [otelcol.receiver.loki.logs_in.receiver]
 
-loki.write "default" {
-  endpoint {
-    url = "http://192.168.20.96:3100/loki/api/v1/push"
+  stage.multiline {
+    firstline     = "(?i)^(warn|info|error|unk)"
+    max_wait_time = "5s"
   }
-  external_labels = {}
+}
+
+otelcol.receiver.loki "logs_in" {
+  output {
+    logs = [otelcol.processor.transform.to_resource.input]
+  }
+}
+
+otelcol.processor.transform "to_resource" {
+  error_mode = "ignore"
+
+  log_statements {
+    context = "log"
+    statements = [
+      `set(resource.attributes["container_name"], attributes["container_name"])`,
+      `set(resource.attributes["host"], attributes["host"])`,
+      `set(resource.attributes["service.name"], attributes["container_name"])`,
+    ]
+  }
+
+  output {
+    logs = [otelcol.processor.batch.logs_default.input]
+  }
+}
+
+otelcol.processor.batch "logs_default" {
+  output {
+    logs = [otelcol.exporter.otlphttp.otlp_out.input]
+  }
 }

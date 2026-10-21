@@ -1,5 +1,5 @@
 services:
-  alloy-config:
+  alloy_conf_manager:
     build: .
     ports:
       - "8081:8080"

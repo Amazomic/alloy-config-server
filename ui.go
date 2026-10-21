@@ -23,6 +23,7 @@ func (s *Server) registerUI(mux *http.ServeMux) {
 			"configs":    s.store.Configs(),
 			"collectors": collectors,
 			"events":     events,
+			"revision":   readConfigRevision(s.store.dir),
 		})
 	})
 
@@ -33,25 +34,23 @@ func (s *Server) registerUI(mux *http.ServeMux) {
 			http.NotFound(w, r)
 			return
 		}
+		if c.Error != "" {
+			http.Error(w, c.Error, http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Write([]byte(c.content))
 	})
 
-	// GET /api/match?env=prod — что получит Alloy с такими атрибутами.
-	mux.HandleFunc("GET /api/match", func(w http.ResponseWriter, r *http.Request) {
-		attrs := map[string]string{}
-		for k, v := range r.URL.Query() {
-			if len(v) > 0 {
-				attrs[k] = v[0]
-			}
+	mux.HandleFunc("GET /api/collector/{id}/config", func(w http.ResponseWriter, r *http.Request) {
+		content, ok := s.collectorConfig(r.PathValue("id"))
+		if !ok {
+			http.NotFound(w, r)
+			return
 		}
-		cfgs := s.store.Select(attrs)
-		names := []string{}
-		for _, c := range cfgs {
-			names = append(names, c.Name)
-		}
-		_, hash := Merge(cfgs)
-		writeJSON(w, map[string]any{"configs": names, "hash": short(hash)})
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Write([]byte(content))
 	})
 }
 

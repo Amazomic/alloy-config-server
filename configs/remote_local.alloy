@@ -1,0 +1,8 @@
+otelcol.exporter.otlphttp "otlp_out" {
+  client {
+    endpoint = "http://host.docker.internal:10099"
+    tls {
+      insecure = true
+    }
+  }
+}
