@@ -1,0 +1,4 @@
+[submodule "configs"]
+	path = configs
+	url = git@github.com:Amazomic/template_alloy.git
+	branch = main

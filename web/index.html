@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alloy Configuration Hub</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<style>
+:root{--bg:#fff;--fg:#1d2433;--mut:#6b7385;--line:#e3e6ee;--card:#f6f7fa;--scroll-thumb:#cbd0da;--scroll-thumb-hover:#aeb5c2;--ok:#188a4a;--warn:#b7791f;--bad:#c0392b;--acc:#3b5bdb;--focus-ring:rgba(59,91,219,.12)}
+@media (prefers-color-scheme:dark){:root{--bg:#14171f;--fg:#e4e7ef;--mut:#8f97aa;--line:#2a2f3c;--card:#1b1f2a;--scroll-thumb:#353b49;--scroll-thumb-hover:#454d5e;--ok:#4cc27f;--warn:#e0a640;--bad:#ef6b5c;--acc:#7f9bff;--focus-ring:rgba(127,155,255,.16)}}
+*{box-sizing:border-box}
+*{scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent}
+*::-webkit-scrollbar{width:8px;height:8px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:var(--scroll-thumb);border:2px solid transparent;border-radius:8px;background-clip:padding-box}
+*::-webkit-scrollbar-thumb:hover{background:var(--scroll-thumb-hover);border:2px solid transparent;background-clip:padding-box}
+body{margin:0;padding:20px;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif;max-width:1200px;margin-inline:auto}
+h1{font-size:18px;margin:0 0 4px}h2{font-size:14px;margin:26px 0 8px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)}
+.page-header{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.app-brand{display:flex;align-items:center;gap:10px;min-width:0}
+.app-icon{width:32px;height:32px;flex:none}
+.header-meta{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px}
+.header-stats{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.header-stat{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--line);border-radius:6px;color:var(--mut);white-space:nowrap}
+.header-stat b{color:var(--fg);font-variant-numeric:tabular-nums}
+.page-header{flex-wrap:wrap}
+.revision-badge{display:none;align-items:center;gap:7px;padding:5px 9px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--mut);font:12px ui-monospace,Menlo,monospace;white-space:nowrap}
+.revision-badge.visible{display:inline-flex}
+.revision-badge a{color:inherit;text-decoration:none;transition:color 160ms ease}
+.revision-badge a:hover{color:var(--acc);text-decoration:underline}
+.revision-badge a:focus-visible{outline:2px solid var(--acc);outline-offset:3px;border-radius:2px}
+.revision-dot{width:7px;height:7px;flex:none;border-radius:50%;background:var(--ok)}
+.revision-badge.empty .revision-dot{background:var(--warn)}
+.revision-badge.error .revision-dot{background:var(--bad)}
+.sub{color:var(--mut);font-size:12px}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--mut);font-weight:600;white-space:nowrap}
+.wrap{overflow-x:auto}
+code,pre,.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.tag{display:inline-block;padding:1px 7px;margin:1px 3px 1px 0;border-radius:10px;background:var(--card);border:1px solid var(--line);white-space:nowrap}
+.tag.attr{color:var(--acc);border-color:var(--acc);font-weight:600}
+.tag.attr-match{color:hsl(var(--attr-hue) 62% 34%);background:hsl(var(--attr-hue) 75% 94%);border-color:hsl(var(--attr-hue) 55% 75%);font-weight:600}
+@media (prefers-color-scheme:dark){.tag.attr-match{color:hsl(var(--attr-hue) 75% 78%);background:hsl(var(--attr-hue) 35% 20%);border-color:hsl(var(--attr-hue) 42% 42%)}}
+.age{white-space:nowrap}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--mut)}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+a,button.link{color:var(--acc);cursor:pointer;background:none;border:0;padding:0;font:inherit;text-decoration:underline}
+button.btn{cursor:pointer;font:inherit;padding:5px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg)}
+button.btn.primary{background:var(--acc);color:#fff;border-color:var(--acc)}
+input{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);width:100%;max-width:100%}
+.kv{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+pre{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:10px;overflow:auto;max-height:420px;margin:8px 0}
+.substitution{background:var(--warn);color:var(--bg);border-radius:3px;padding:0 2px;font-weight:700}
+.empty{color:var(--mut);padding:10px 0}
+.editor{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+.editor h3{margin:0 0 8px;font-size:14px}
+.editor .row{margin:8px 0}
+.editor .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.hint{color:var(--mut);font-size:12px;margin:4px 0 0}
+.icon-button{display:inline-grid;place-items:center;width:30px;height:30px;padding:0;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--mut);cursor:pointer}
+.icon-button svg{width:16px;height:16px}
+.config-dialog{width:min(900px,calc(100vw - 32px));max-width:none;max-height:85vh;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);box-shadow:0 18px 60px #0005}
+.config-dialog::backdrop{background:#080b12a8;backdrop-filter:blur(2px)}
+.config-dialog-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.config-dialog-header h3{margin:0;font-size:15px;overflow-wrap:anywhere}
+.config-dialog pre{max-height:calc(85vh - 84px);white-space:pre;tab-size:4}
+.config-part{display:block;margin:0 -6px;padding:2px 6px;background:hsl(var(--part-hue) 75% 60% / .12);border-left:2px solid hsl(var(--part-hue) 65% 55% / .5)}
+.config-part-neutral{background:color-mix(in srgb,var(--mut) 8%,transparent);border-left-color:var(--line)}
+:root{--space:8px;--radius:6px;--control:30px}
+html{scrollbar-gutter:stable}
+body{max-width:1440px;padding:20px;font-size:12px;line-height:1.4}
+h1{margin:0;font-size:18px;line-height:1.5;white-space:nowrap}
+h2{margin:24px 0 8px;font-size:11px;letter-spacing:.08em}
+.page-header{min-height:36px;gap:16px}
+.revision-badge{border-radius:var(--radius);padding:6px 10px;min-height:32px}
+.wrap{border:1px solid var(--line);border-radius:var(--radius);scrollbar-gutter:stable;overscroll-behavior-x:contain}
+table{table-layout:fixed;min-width:1100px}
+#col{min-width:1200px}#ev{min-width:800px}
+th,td{padding:7px 10px;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+th{height:32px;background:var(--card);font-size:11px}
+td{height:40px}tr:last-child td{border-bottom:0}
+td.empty{padding:12px 10px;height:auto}
+td.attributes-cell{white-space:normal;overflow:visible}
+.attribute-list{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.attribute-list .tag{margin:0;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.collector-identity{display:flex;align-items:center;gap:8px}
+.collector-identity .dot{flex:none;margin:0}
+.collector-details{min-width:0;display:flex;flex-direction:column;gap:2px}
+.collector-id{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:18px}
+td .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#col th:nth-child(1){width:18%}#col th:nth-child(2){width:23%}#col th:nth-child(3){width:15%}
+#col th:nth-child(4){width:9%}#col th:nth-child(5),#col th:nth-child(6){width:9%}
+#col th:nth-child(7){width:6%}#col th:nth-child(8){width:11%}
+.config-state{min-width:88px;white-space:nowrap}
+.config-state.received{color:var(--ok);border-color:var(--ok)}
+.config-state.sent{color:var(--warn)}
+.config-state.error{color:var(--bad);border-color:var(--bad)}
+button:disabled{opacity:.45;cursor:default}
+#cfg th:nth-child(1){width:22%}#cfg th:nth-child(2){width:25%}#cfg th:nth-child(3){width:8%}
+#cfg th:nth-child(4){width:16%}#cfg th:nth-child(5){width:11%}#cfg th:nth-child(6){width:8%}#cfg th:nth-child(7){width:10%}
+#ev th:nth-child(1){width:12%}#ev th:nth-child(2){width:14%}#ev th:nth-child(3){width:22%}#ev th:nth-child(4){width:52%}
+.tag{margin:0 4px 0 0;padding:1px 6px;border-radius:5px;font-size:11px;line-height:18px}
+.age,td:nth-last-child(2){font-variant-numeric:tabular-nums}
+input,button.btn{min-height:var(--control);padding:5px 8px;border-radius:var(--radius)}
+.icon-button{width:28px;height:28px;border-radius:var(--radius);flex-shrink:0}
+button:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.config-dialog{padding:20px;border-radius:12px}
+.config-dialog-header h3{flex:1;min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.config-dialog::backdrop{backdrop-filter:none}
+.config-dialog pre{padding:12px;margin:16px 0 0;line-height:1.6}
+.connection-status{min-height:20px;margin-top:8px;color:var(--mut);font-size:12px}
+@media(max-width:600px){body{padding:16px}.page-header{align-items:flex-start;flex-direction:column;gap:8px}h1{font-size:16px}h2{margin-top:24px}.config-dialog{padding:16px}}
+button.btn,.icon-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:30px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);font:500 11px/1.2 system-ui,sans-serif;cursor:pointer;transition:background-color 160ms ease,border-color 160ms ease,color 160ms ease,box-shadow 160ms ease,transform 100ms ease}
+button.btn{padding:6px 10px}
+.icon-button{width:30px;height:30px;min-width:30px;padding:0}
+button svg{width:14px;height:14px;flex:none}
+button.btn:not(:disabled):hover,.icon-button:not(:disabled):hover{background:color-mix(in srgb,var(--acc) 12%,var(--card));border-color:var(--acc);box-shadow:0 2px 7px color-mix(in srgb,var(--acc) 15%,transparent)}
+button.btn:not(:disabled):active,.icon-button:not(:disabled):active{transform:scale(.97);box-shadow:none;background:color-mix(in srgb,var(--acc) 20%,var(--card))}
+button:disabled{opacity:.45;cursor:default}
+.dialog-actions{display:flex;align-items:center;gap:8px;flex:none}
+.copy-button{min-width:90px}
+.copy-button.copied{color:var(--ok);border-color:var(--ok)}
+.copy-feedback{font-size:12px;color:var(--mut);min-height:17px;margin-top:4px}
+.copy-feedback:empty{display:none}
+.config-dialog[open]{animation:dialog-enter 160ms ease-out}
+@keyframes dialog-enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){button.btn,.icon-button{transition:none}.config-dialog[open]{animation:none}button.btn:not(:disabled):active,.icon-button:not(:disabled):active{transform:none}}
+</style>
+</head>
+<body>
+<header class="page-header">
+  <div class="app-brand"><img class="app-icon" src="/icon.svg" width="32" height="32" alt=""><h1>Alloy Configuration Hub</h1></div>
+  <div class="header-meta">
+    <div class="header-stats" aria-label="Server overview">
+      <span class="header-stat" title="Collectors seen in the last 5 minutes, excluding explicit disconnects">Active collectors <b id="active-collectors">—</b></span>
+      <span class="header-stat" title="Configuration files, including files with errors">Config files <b id="config-files">—</b></span>
+      <span class="header-stat" title="Unique relay names and addresses seen polling in the last 5 minutes; nearest relay in a chain">Connected relays <b id="connected-relays">—</b></span>
+    </div>
+    <div id="config-revision" class="revision-badge" aria-live="polite"></div>
+  </div>
+</header>
+<h2>Alloy Collectors</h2>
+<div class="wrap"><table id="col"></table></div>
+<h2>Configs</h2>
+<div class="wrap"><table id="cfg"></table></div>
+<div id="view"></div>
+<h2>Events</h2>
+<div class="wrap"><table id="ev"></table></div>
+<div id="connection-status" class="connection-status" role="status"></div>
+<dialog id="collector-config-dialog" class="config-dialog" aria-labelledby="collector-config-title">
+  <div class="config-dialog-header">
+    <h3 id="collector-config-title"></h3>
+    <div class="dialog-actions">
+      <button id="copy-config" class="btn copy-button" type="button" disabled aria-label="Copy configuration">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></svg><span id="copy-config-label">Copy</span>
+      </button>
+      <button class="icon-button" type="button" data-close-config-dialog aria-label="Close" title="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m18 6-12 12M6 6l12 12"/></svg>
+      </button>
+    </div>
+  </div>
+  <div id="copy-feedback" class="copy-feedback" role="status" aria-live="polite"></div>
+  <div id="collector-config-meta" class="sub"></div>
+  <pre id="collector-config-content"></pre>
+</dialog>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const highlightSubstitutions=s=>esc(s).replace(/\{\{name\}\}/g,'<mark class="substitution" title="Uses the name attribute, falling back to id">$&</mark>');
+const formatAgo=t=>{if(!t||t.startsWith('0001'))return '—';const s=Math.max(0,(Date.now()-new Date(t))/1000);
+  if(s<60)return Math.round(s)+'s ago';if(s<3600)return Math.round(s/60)+'m ago';if(s<86400)return Math.round(s/3600)+'h ago';return Math.round(s/86400)+'d ago'};
+const ago=t=>`<span class="age" data-time="${esc(t)}">${formatAgo(t)}</span>`;
+const collectorAgeClass=t=>{const age=(Date.now()-new Date(t))/1000;return age<300?'ok':age<1800?'warn':'bad'};
+function updateAges(){
+  if(document.hidden)return;
+  document.querySelectorAll('.age').forEach(el=>{const text=formatAgo(el.dataset.time);if(el.textContent!==text)el.textContent=text});
+  document.querySelectorAll('.collector-age').forEach(el=>{
+    const cls=collectorAgeClass(el.dataset.time);
+    if(!el.classList.contains(cls)){el.classList.remove('ok','warn','bad');el.classList.add(cls)}
+  });
+}
+const tags=o=>Object.entries(o||{}).map(([k,v])=>`<span class="tag">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="sub">—</span>';
+const attributeTags=(o,selectors,selectorColors)=>Object.entries(o||{}).map(([k,v])=>{
+  const pair=JSON.stringify([k,v]);
+  const color=selectors.has(pair)?selectorColors.get(pair):undefined;
+  const colorStyle=color===undefined?'':` style="--attr-hue:${color}"`;
+  return `<span class="tag${color!==undefined?' attr-match':''}"${colorStyle}>${esc(k)}=${esc(v)}</span>`;
+}).join('')||'<span class="sub">—</span>';
+const getSelectorColors=cfgs=>{
+  const pairs=new Set();
+  cfgs.forEach(cfg=>Object.entries(cfg.selector||{}).forEach(([key,value])=>pairs.add(JSON.stringify([key,value]))));
+  return new Map([...pairs].sort().map((pair,index)=>[pair,(index*137.508)%360]));
+};
+const configIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M8 13h8M8 17h6"/></svg>';
+const evColor={initial:'ok',received:'ok',synced:'ok',update_sent:'warn',status:'warn',register:'',unregister:''};
+let currentCollectors=[],currentConfigs=[];
+$('cfg').addEventListener('click',e=>{
+  const button=e.target.closest('button[data-config]');
+  if(button)show(button.dataset.config).catch(showConfigError);
+});
+$('col').addEventListener('click',e=>{
+  const button=e.target.closest('button[data-collector-config]');
+  if(button)showCollectorConfig(button.dataset.collectorConfig).catch(showConfigError);
+});
+function showConfigError(err){
+  resetCopyButton(false);
+  $('collector-config-meta').textContent='';
+  $('collector-config-title').textContent='Unable to load config';
+  $('collector-config-content').textContent=err.message;
+  if(!$('collector-config-dialog').open)$('collector-config-dialog').showModal();
+}
+$('collector-config-dialog').addEventListener('click',e=>{
+  if(e.target===$('collector-config-dialog')||e.target.closest('[data-close-config-dialog]'))$('collector-config-dialog').close();
+});
+// Reuse rows and cells so polling preserves focus, selection and scroll positions.
+function updateTable(id,html){
+  const table=$(id);
+  const template=document.createElement('template');
+  template.innerHTML='<table><tbody>'+html+'</tbody></table>';
+  const rows=[...template.content.querySelector('tbody').children];
+  const body=table.tBodies[0]||table.createTBody();
+  const rowKey=row=>row.hasAttribute('data-key')?'row:'+row.dataset.key:'header';
+  const existing=new Map([...body.rows].map(row=>[rowKey(row),row]));
+  rows.forEach((next,index)=>{
+    const key=rowKey(next);
+    let row=existing.get(key);
+    if(row){
+      existing.delete(key);
+      const cellCount=next.cells.length;
+      [...next.cells].forEach((cell,i)=>{
+        const current=row.cells[i];
+        const normalized=html=>html.replace(/(<span class="age"[^>]*>)[^<]*(<\/span>)/g,'$1$2');
+        if(!current){row.append(cell);return}
+        if(normalized(current.innerHTML)!==normalized(cell.innerHTML)||current.className!==cell.className||current.colSpan!==cell.colSpan){
+          current.replaceWith(cell);
+        }
+      });
+      while(row.cells.length>cellCount)row.deleteCell(-1);
+    }else row=next;
+    if(body.children[index]!==row)body.insertBefore(row,body.children[index]||null);
+  });
+  existing.forEach(row=>row.remove());
+  body.querySelectorAll('td').forEach(cell=>{
+    // Truncated values remain available without expanding the row.
+    const title=cell.textContent.trim();
+    if(cell.title!==title)cell.title=title;
+  });
+}
+let previousSections={};
+async function load(){
+  const response=await fetch('/api/state',{signal:AbortSignal.timeout(10000)});
+  if(!response.ok)throw new Error('HTTP '+response.status);
+  const st=await response.json();
+  const cols=st.collectors||[], cfgs=st.configs||[], evs=st.events||[];
+  renderSummary(st.summary);
+  const revisionKey=JSON.stringify(st.revision);
+  if(previousSections.revision!==revisionKey){renderConfigRevision(st.revision);previousSections.revision=revisionKey}
+  currentCollectors=cols; currentConfigs=cfgs;
+  renderCollectors(cols,cfgs);
+  const configKey=JSON.stringify([cfgs,cols.map(c=>c.configs)]);
+  if(previousSections.configs!==configKey){
+  updateTable('cfg',cfgs.length?`<tr><th>File</th><th>Attribute</th><th>Size</th><th>Hash</th><th>Modified</th><th>Subscribers</th><th>Config</th></tr>`+
+    cfgs.map(c=>{
+      const n=cols.filter(x=>(x.configs||[]).includes(c.name)).length;
+      const cond=c.always?'<span class="tag ok">all</span>':tags(c.selector);
+      return `<tr data-key="${esc(c.name)}"><td><b class="mono">${esc(c.label)}.alloy</b>${c.error?`<div class="bad">⚠ ${esc(c.error)}</div>`:''}${c.warning?`<div class="warn">⚠ ${esc(c.warning)}</div>`:''}</td>
+      <td>${cond}</td><td>${c.size} B</td><td class="mono">${esc(c.hash)}</td><td>${ago(c.modified)}</td>
+      <td>${n} Alloy</td><td><button class="btn config-state" type="button" data-config="${esc(c.name)}" aria-label="View config ${esc(c.label)}" title="View config">${configIcon}<span>View</span></button></td></tr>`}).join('')
+    :'<tr data-key="empty"><td class="empty" colspan="7">No *.alloy files found</td></tr>');
+  previousSections.configs=configKey;
+  }
+  const eventsKey=JSON.stringify(evs.slice(0,100));
+  if(previousSections.events!==eventsKey){
+  updateTable('ev',evs.length?`<tr><th>Time</th><th>Type</th><th>Alloy</th><th>Message</th></tr>`+
+    evs.slice(0,100).map((e,index)=>`<tr data-key="${esc(JSON.stringify([e.time,e.type,e.collector,e.message,index]))}"><td class="mono" title="${esc(e.time)}">${new Date(e.time).toLocaleTimeString('en-US')}</td><td class="${evColor[e.type]||''}">${esc(e.type)}</td><td>${esc(e.collector)}</td><td class="mono">${esc(e.message)}</td></tr>`).join('')
+    :'<tr data-key="empty"><td class="empty" colspan="4">No events</td></tr>');
+  previousSections.events=eventsKey;
+  }
+  updateAges();
+}
+function renderSummary(summary){
+  for(const [id,key] of [['active-collectors','active_collectors'],['config-files','config_files'],['connected-relays','connected_relays']]){
+    const value=String(summary?.[key]??'—');
+    if($(id).textContent!==value)$(id).textContent=value;
+  }
+}
+function renderConfigRevision(revision){
+  const badge=$('config-revision');
+  badge.replaceChildren();
+  badge.className='revision-badge';
+  badge.removeAttribute('title');
+  if(!revision?.commit||revision.error||!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(revision.commit))return;
+  badge.className='revision-badge visible';
+  badge.title=revision.commit;
+  let commitURL;
+  try{
+    const parsed=new URL(revision.url);
+    if(['https:','http:'].includes(parsed.protocol)&&!parsed.username&&!parsed.password)commitURL=parsed.href;
+  }catch{}
+  const hash=document.createElement(commitURL?'a':'span');
+  hash.textContent=revision.commit.slice(0,7);
+  if(commitURL){
+    hash.href=commitURL;
+    hash.target='_blank';
+    hash.rel='noopener noreferrer';
+    hash.setAttribute('aria-label','Open configuration commit '+revision.commit);
+  }
+  badge.append(hash);
+}
+function configDeliveryState(c){
+  if(!c.polls)return {key:'pending',label:'—',description:'No configuration has been sent yet'};
+  if(c.status==='failed'&&c.client_hash===c.server_hash)return {key:'error',label:'Error',description:c.status_error||'Alloy failed to apply this configuration'};
+  if(c.applied_hash===c.server_hash&&c.status==='applied')return {key:'received',label:'Received',description:'Alloy confirmed application through APPLIED or its effective configuration'};
+  if(c.received_hash===c.server_hash&&c.status!=='failed'&&c.status!=='applying')return {key:'received',label:'Received',description:'Alloy acknowledged this configuration hash; application status has not been reported'};
+  return {key:'sent',label:'Sent',description:'Awaiting confirmation that Alloy applied this configuration'};
+}
+let collectorRenderKey='';
+function renderCollectors(cols,cfgs){
+  const renderKey=JSON.stringify([cols,cfgs]);
+  if(collectorRenderKey===renderKey)return;
+  collectorRenderKey=renderKey;
+  const selectorColors=getSelectorColors(cfgs);
+  const frequencies=new Map();
+  cols.forEach(c=>Object.entries(c.attributes||{}).forEach(([key,value])=>{
+    const pair=JSON.stringify([key,value]);
+    frequencies.set(pair,(frequencies.get(pair)||0)+1);
+  }));
+  const popularity=c=>Math.max(0,...Object.entries(c.attributes||{}).map(([key,value])=>frequencies.get(JSON.stringify([key,value]))||0));
+  const sortedCols=[...cols].sort((a,b)=>
+    popularity(b)-popularity(a)||a.id.localeCompare(b.id));
+  updateTable('col',sortedCols.length?`<tr><th>ID</th><th>Attributes</th><th>Hash (Alloy → Server)</th><th>Status</th><th>Last seen</th><th>Last synced</th><th>Polls</th><th>Config</th></tr>`+
+    sortedCols.map(c=>{
+      const cls=!c.registered&&c.polls===0?'warn':collectorAgeClass(c.last_seen);
+      const delivery=configDeliveryState(c);
+      const inSync=delivery.key==='received';
+      const matchedSelectors=new Set(cfgs
+        .filter(cfg=>(c.configs||[]).includes(cfg.name)&&!cfg.error)
+        .flatMap(cfg=>Object.entries(cfg.selector||{}).map(([key,value])=>JSON.stringify([key,value]))));
+      return `<tr data-key="${esc(c.id)}"><td><div class="collector-identity"><span class="dot ${cls}${c.registered||c.polls!==0?' collector-age':''}"${c.registered||c.polls!==0?` data-time="${esc(c.last_seen)}"`:''}></span><div class="collector-details"><b class="collector-id" title="${esc(c.id)}">${esc(c.id)}</b>${c.name&&c.name!==c.id?`<div class="sub" title="${esc(c.name)}">${esc(c.name)}</div>`:''}${c.remote_addr?`<div class="sub mono" title="${esc(c.remote_addr)}">${esc(c.remote_addr)}</div>`:''}</div></div></td>
+      <td class="attributes-cell"><div class="attribute-list">${attributeTags(c.attributes,matchedSelectors,selectorColors)}</div></td>
+      <td class="mono ${inSync?'ok':'warn'}">${esc((c.client_hash||'∅').slice(0,8))} → ${esc((c.server_hash||'').slice(0,8))}</td>
+      <td class="${c.status==='failed'?'bad':''}">${esc(c.status||(delivery.key==='received'?'received':'—'))}<div class="sub bad">${esc(c.status_error)}</div></td>
+      <td>${ago(c.last_seen)}</td><td title="Last confirmation of configuration receipt or application">${ago(c.last_synced)}</td><td>${c.polls}</td>
+      <td><button class="btn config-state ${delivery.key}" type="button" data-collector-config="${esc(c.id)}" ${c.polls?'':'disabled'} title="${esc(delivery.description)}" aria-label="View config for ${esc(c.id)}: ${delivery.label}">${configIcon}<span>${delivery.label}</span></button></td></tr>`}).join('')
+    :'<tr data-key="empty"><td class="empty" colspan="8">No Alloy collectors have connected yet</td></tr>');
+}
+let copyResetTimer=null,configurationCopyText='';
+function resetCopyButton(enabled=true){
+  clearTimeout(copyResetTimer);
+  $('copy-config').disabled=!enabled;
+  $('copy-config').classList.remove('copied');
+  $('copy-config-label').textContent='Copy';
+  $('copy-feedback').textContent='';
+}
+async function copyConfiguration(){
+  const text=configurationCopyText;
+  try{
+    if(navigator.clipboard&&window.isSecureContext){
+      await navigator.clipboard.writeText(text);
+    }else{
+      // The dashboard is also served over HTTP, where Clipboard API is unavailable.
+      const field=document.createElement('textarea');
+      field.value=text;
+      field.style.cssText='position:fixed;left:-9999px;top:0';
+      field.setAttribute('aria-label','Configuration to copy');
+      $('collector-config-dialog').append(field);
+      try{
+        field.focus();field.select();
+        if(!document.execCommand('copy'))throw new Error('Clipboard unavailable');
+      }finally{field.remove();$('copy-config').focus()}
+    }
+    $('copy-config').classList.add('copied');
+    $('copy-config-label').textContent='Copied';
+    $('copy-feedback').textContent='Configuration copied to clipboard.';
+    copyResetTimer=setTimeout(()=>resetCopyButton(),2000);
+  }catch(error){
+    $('copy-feedback').textContent='Unable to copy. Select the configuration and copy it manually.';
+  }
+}
+$('copy-config').addEventListener('click',copyConfiguration);
+$('collector-config-dialog').addEventListener('close',()=>resetCopyButton(false));
+async function show(name){
+  const response=await fetch('/api/config/'+encodeURIComponent(name));
+  if(!response.ok)throw new Error((await response.text())||response.statusText);
+  const content=await response.text();
+  configurationCopyText=content;
+  $('collector-config-title').textContent=`Config ${name}.alloy`;
+  $('collector-config-meta').textContent='Source file';
+  $('collector-config-content').innerHTML=highlightSubstitutions(content);
+  resetCopyButton();
+  $('collector-config-dialog').showModal();
+}
+function renderConfigParts(content,parts,configs){
+  // Use metadata from the same snapshot as the final content, not source comments.
+  if(parts.map(part=>part.content).join('')!==content)return esc(content);
+  const selectorColors=getSelectorColors([...configs,...parts]);
+  return parts.map(part=>{
+    if(!part.name)return esc(part.content);
+    const [key,value]=Object.entries(part.selector||{})[0]||[];
+    const pair=key===undefined?undefined:JSON.stringify([key,value]);
+    const hue=pair===undefined?undefined:selectorColors.get(pair);
+    const colorStyle=hue===undefined?'':' style="--part-hue:'+hue+'"';
+    return `<span class="config-part${hue===undefined?' config-part-neutral':''}"${colorStyle} title="${esc(part.name)}.alloy">${esc(part.content)}</span>`;
+  }).join('');
+}
+async function showCollectorConfig(id){
+  const collector=currentCollectors.find(c=>c.id===id);
+  const delivery=configDeliveryState(collector||{});
+  const reportRequest=collector?.effective_known?fetch('/api/collector/'+encodeURIComponent(id)+'/effective-config').then(async response=>{
+    if(!response.ok)return null;
+    return response.json();
+  }).catch(()=>null):Promise.resolve(null);
+  const response=await fetch('/api/collector/'+encodeURIComponent(id)+'/config?format=json');
+  if(!response.ok)throw new Error((await response.text())||response.statusText);
+  const {content,parts=[]}=await response.json();
+  configurationCopyText=content;
+  const report=await reportRequest;
+  $('collector-config-title').textContent=`Alloy ${id} — ${delivery.label}`;
+  $('collector-config-meta').textContent=delivery.description+(report?' · Last reported: '+new Date(report.received_at).toLocaleString():'');
+  $('collector-config-content').innerHTML=renderConfigParts(content,parts,currentConfigs);
+  if(report){
+    const files=report.files||[];
+    const reported=files.map(file=>(files.length>1||file.name?'// File: '+file.name+'\n':'')+file.content).join('\n\n');
+    if(files.length!==1||files[0].content!==content){
+      $('collector-config-content').insertAdjacentHTML('afterbegin','<span class="sub">Server configuration</span>\n');
+      $('collector-config-content').insertAdjacentHTML('beforeend','\n\n<span class="sub">Last configuration reported by Alloy</span>\n'+esc(reported||'Alloy reported an empty effective configuration.'));
+    }
+  }
+  resetCopyButton();
+  $('collector-config-dialog').showModal();
+}
+// Schedule after completion: slow responses never create overlapping requests.
+let refreshTimer=null,loading=false;
+async function autoLoad(){
+  clearTimeout(refreshTimer);
+  if(loading||document.hidden)return;
+  const selection=window.getSelection();
+  if($('collector-config-dialog').open||
+     (selection&&!selection.isCollapsed)){
+    refreshTimer=setTimeout(autoLoad,3000);return;
+  }
+  loading=true;
+  try{
+    await load();
+    if($('connection-status').textContent)$('connection-status').textContent='';
+  }catch(error){
+    const message='Connection interrupted. Retrying automatically.';
+    if($('connection-status').textContent!==message)$('connection-status').textContent=message;
+  }finally{
+    loading=false;
+    if(!document.hidden)refreshTimer=setTimeout(autoLoad,3000);
+  }
+}
+document.addEventListener('visibilitychange',()=>{
+  clearTimeout(refreshTimer);
+  if(!document.hidden){updateAges();autoLoad()}
+});
+$('collector-config-dialog').addEventListener('close',()=>{clearTimeout(refreshTimer);refreshTimer=setTimeout(autoLoad,0)});
+autoLoad();setInterval(updateAges,1000);
+</script>
+</body>
+</html>

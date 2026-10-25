@@ -1,0 +1,8 @@
+# Only build inputs enter the Docker context; configs and credentials stay local.
+*
+!Dockerfile
+!go.mod
+!go.sum
+!*.go
+!web/
+!web/**

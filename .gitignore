@@ -1,0 +1,32 @@
+bin/
+data/
+
+# Go build and test artifacts
+*.exe
+*.test
+*.out
+coverage.txt
+coverage/
+dist/
+output/
+tmp/
+.cache/
+relay-cache/
+
+# Local environment and logs
+.env
+.env.*
+!.env.example
+*.log
+# Local collector configuration belongs to the separate configuration repository.
+/*.alloy
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+*.secret
+
+# Operating system metadata
+.DS_Store
+Thumbs.db

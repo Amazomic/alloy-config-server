@@ -1,0 +1,92 @@
+# All services are opt-in. Select hub, relay, alloy, or a combination of profiles.
+services:
+  alloy_configuration_hub:
+    profiles: [hub]
+    image: alloy-configuration-hub:local
+    build: .
+    environment:
+      CONFIG_DIR: /configs
+      CONFIG_REVISION_DIR: /config-revision
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_NOT_MODIFIED: ${LOG_NOT_MODIFIED:-true}
+    ports:
+      - "${HUB_BIND_ADDRESS:-0.0.0.0}:${HUB_PORT:-8081}:8080"
+    volumes:
+      - type: bind
+        source: ${CONFIG_SOURCE_DIR:-./configs}
+        target: /configs
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${CONFIG_GIT_DIR:-${CONFIG_SOURCE_DIR:-./configs}}
+        target: /config-revision
+        read_only: true
+        bind:
+          create_host_path: false
+    restart: unless-stopped
+
+  alloy_config_relay:
+    profiles: [relay]
+    image: alloy-configuration-hub:local
+    build: .
+    environment:
+      APP_MODE: relay
+      RELAY_NAME: ${RELAY_NAME:-config-relay}
+      # Validated by the relay at startup; inactive profiles need no upstream URL.
+      UPSTREAM_URL: ${UPSTREAM_URL:-}
+      LISTEN_ADDR: :8080
+      RELAY_CACHE_DIR: /var/lib/alloy-config-server/relay-cache
+      RELAY_TIMEOUT: ${RELAY_TIMEOUT:-5s}
+      RELAY_CACHE_MAX_AGE: ${RELAY_CACHE_MAX_AGE:-0s}
+      UPSTREAM_BEARER_TOKEN: ${UPSTREAM_BEARER_TOKEN:-}
+    ports:
+      - "${RELAY_BIND_ADDRESS:-0.0.0.0}:${RELAY_PORT:-8082}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - relay_cache:/var/lib/alloy-config-server/relay-cache
+    restart: unless-stopped
+
+  alloy:
+    profiles: [alloy]
+    image: grafana/alloy:v1.21.1
+    hostname: ${ALLOY_ID:-alloy-local}
+    restart: unless-stopped
+    user: "0:0"
+    privileged: true
+    pid: host
+    cgroup: host
+    environment:
+      ALLOY_CONFIG_URL: ${ALLOY_CONFIG_URL:-http://alloy_configuration_hub:8080}
+      ALLOY_ENV: ${ALLOY_ENV:-prod}
+      ALLOY_REMOTE: ${ALLOY_REMOTE:-local}
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    ports:
+      - "${ALLOY_BIND_ADDRESS:-0.0.0.0}:${ALLOY_PORT:-12345}:12345"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - type: bind
+        source: ${ALLOY_CONFIG_FILE:-./configs/collector/config.alloy}
+        target: /etc/alloy/config.alloy
+        read_only: true
+        bind:
+          create_host_path: false
+      - alloy_data:/var/lib/alloy/data
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /run/udev:/run/udev:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    devices:
+      - /dev/kmsg:/dev/kmsg
+
+volumes:
+  alloy_data:
+  relay_cache:
