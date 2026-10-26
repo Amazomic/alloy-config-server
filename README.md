@@ -1,132 +1,85 @@
 # Alloy Configuration Hub
 
-> Использует [`remotecfg`](https://grafana.com/docs/alloy/latest/reference/config-blocks/remotecfg/) Grafana Alloy и реализует [Alloy Remote Config API](https://github.com/grafana/alloy-remote-config).
-
 [English](README.en.md) · Русский
 
-Hub выдаёт конфигурации по атрибутам коллекторов, показывает их состояние и поддерживает ретрансляторы с офлайн-кешем. Интерфейс доступен только для чтения.
+Hub раздаёт конфигурации Grafana Alloy по атрибутам коллекторов. Alloy забирает их через `remotecfg`, а в веб-интерфейсе видны коллекторы, конфиги и события.
+
+```text
+configs/*.alloy → Hub ← Alloy
+                      ← Relay ← Alloy (при необходимости)
+```
+
+Relay передаёт конфигурации и отчёты между Alloy и Hub и хранит кеш на случай недоступности Hub. Метрики, логи и трейсы Alloy отправляет напрямую в настроенные системы хранения.
 
 ![Интерфейс Alloy Configuration Hub](docs/images/hub-dashboard.jpg)
 
-*Демонстрационные данные: коллекторы, конфигурации, события и хеш коммита.*
+## Запуск Hub
 
-## Свой репозиторий конфигураций
-
-Храните `.alloy`-файлы отдельно от приложения. Клонируйте собственный репозиторий, скопируйте `.env.example` в `.env` и задайте `CONFIG_SOURCE_DIR`:
+Нужны Docker и Compose. В каталоге проекта:
 
 ```bash
-git clone <URL_ВАШЕГО_РЕПОЗИТОРИЯ> ../alloy-configs
-cp .env.example .env
+git submodule update --init --recursive
+docker compose --profile hub up -d --build
 ```
 
-```dotenv
-CONFIG_SOURCE_DIR=../alloy-configs
-```
+Интерфейс: [http://localhost:8081](http://localhost:8081).
 
-Подойдёт и обычная папка без Git. Она должна существовать до запуска; Hub читает только `.alloy`-файлы в её корне и монтирует её только для чтения.
+Конфигурации лежат в `configs/` — это подключённый репозиторий с шаблонами. Измените `.alloy`-файлы под свою инфраструктуру, в том числе адреса назначения телеметрии. Hub автоматически перечитывает файлы; перезапуск не нужен. Обновление файлов из Git выполняется отдельно.
 
-При наличии `.git` в шапке появляется короткий хеш `HEAD` со ссылкой на коммит из `origin`. Без remote хеш отображается без ссылки, без Git — скрыт. Для submodule/worktree при необходимости задайте `CONFIG_GIT_DIR`: путь можно получить через `git -C ../alloy-configs rev-parse --absolute-git-dir`.
+## Подключение Alloy
 
-Hub перечитывает файлы с кешем в одну секунду, но не выполняет Git-операции. Обновляйте рабочую копию самостоятельно: `git -C ../alloy-configs pull --ff-only`.
-
-## Выбор конфигураций
-
-- `env_prod.alloy` применяется при `env=prod`; первое подчёркивание разделяет атрибут и значение. Старый формат `env=prod.alloy` тоже поддерживается.
-- Буквальное имя `*.alloy` означает общий конфиг; создать его можно на файловой системе, допускающей `*`.
-- Совпавшие файлы объединяются внутри `declare "node_stack"`: общие первыми, затем по имени. Имена компонентов не должны конфликтовать.
-- `{{name}}` заменяется атрибутом `name`, затем `id` коллектора. Имена файлов в итоговый текст не добавляются.
-
-Hub проверяет имена и читаемость файлов; синтаксис проверяет Alloy при применении. При ошибке чтения сохраняется последняя читаемая версия, если она есть.
-
-## Запуск: один Compose, три профиля
-
-Профили включаются явно; без них `docker compose up` не выбирает сервисы.
-
-| Вариант | Команда |
-|---|---|
-| Hub | `docker compose --profile hub up -d --build` |
-| Hub + Alloy | `docker compose --profile hub --profile alloy up -d --build` |
-| Ретранслятор | `docker compose --profile relay up -d --build` |
-| Ретранслятор + Alloy | `docker compose --profile relay --profile alloy up -d --build` |
-| Всё | `docker compose --profile hub --profile relay --profile alloy up -d --build` |
-
-Для ретранслятора задайте `UPSTREAM_URL`: адрес внешнего Hub либо `http://alloy_configuration_hub:8080`, если Hub запущен рядом. Чтобы Alloy обращался через ретранслятор, задайте `ALLOY_CONFIG_URL=http://alloy_config_relay:8080`.
-
-Профиль `alloy` требует bootstrap-файл в `ALLOY_CONFIG_FILE`, например:
+Добавьте в локальный `config.alloy`:
 
 ```alloy
 remotecfg {
-  url            = sys.env("ALLOY_CONFIG_URL")
+  url            = "http://hub-server:8081"
   id             = constants.hostname
   poll_frequency = "30s"
+
   attributes = {
     name   = constants.hostname,
-    env    = sys.env("ALLOY_ENV"),
-    remote = sys.env("ALLOY_REMOTE"),
+    env    = "prod",
+    remote = "local",
   }
 }
 ```
 
-Для cAdvisor нужен **Linux Docker host**: Alloy работает с `privileged` и доступом к системным каталогам. В Docker Desktop собираются метрики Linux VM. Hub и ретранслятор непривилегированные.
+Замените `hub-server` на IP или имя сервера с Hub. Если Alloy запущен на том же хосте вне контейнера, можно указать `http://localhost:8081`. Атрибуты задаются прямо в конфиге; переменные окружения не нужны.
 
-## Основные настройки
+Запустите или перезапустите Alloy с этим файлом. Коллектор появится в интерфейсе после первого обращения.
 
-Полный пример — [.env.example](.env.example); PowerShell: `Copy-Item .env.example .env`.
+## Как выбираются конфиги
 
-| Переменная | По умолчанию / назначение |
+Hub читает `.alloy`-файлы в корне `configs/`. Имя файла задаёт атрибут и значение:
+
+| Файл | Атрибут Alloy |
 |---|---|
-| `CONFIG_SOURCE_DIR`, `CONFIG_GIT_DIR` | `./configs`; отдельные Git-метаданные необязательны |
-| `HUB_PORT`, `RELAY_PORT`, `ALLOY_PORT` | `8081`, `8082`, `12345`; внутри сети Hub и relay — `8080` |
-| `HUB_BIND_ADDRESS`, `RELAY_BIND_ADDRESS`, `ALLOY_BIND_ADDRESS` | `0.0.0.0`; для локального доступа — `127.0.0.1` |
-| `UPSTREAM_URL`, `UPSTREAM_BEARER_TOKEN` | Адрес Hub и необязательный токен ретранслятора |
-| `RELAY_NAME`, `RELAY_TIMEOUT`, `RELAY_CACHE_MAX_AGE` | `config-relay`, `5s`, `0s` (без срока); можно ограничить, например `24h` |
-| `ALLOY_CONFIG_FILE`, `ALLOY_CONFIG_URL` | `./configs/collector/config.alloy`, `http://alloy_configuration_hub:8080` |
-| `ALLOY_ID`, `ALLOY_ENV`, `ALLOY_REMOTE` | `alloy-local`, `prod`, `local` |
+| `env_prod.alloy` | `env = "prod"` |
+| `remote_local.alloy` | `remote = "local"` |
+| `job_grafana.alloy` | `job = "grafana"` |
 
-Остановка сохраняет тома `alloy_data` и `relay_cache`; `down -v` удаляет их. `.env`, локальные конфиги и секреты игнорируются Git и не входят в Docker-образ.
+Все подходящие файлы объединяются внутри `declare "node_stack"` и применяются через `node_stack "default"`. `{{name}}` в шаблонах заменяется атрибутом `name`, а если его нет — ID коллектора.
 
-## Интерфейс и ретранслятор
+Выбирайте совместимые шаблоны: `env_prod.alloy` и `job_grafana.alloy` содержат одинаковые имена компонентов и рассчитаны на разные варианты сбора. Синтаксис итогового конфига проверяет Alloy.
 
-Шапка показывает коллекторы и ретрансляторы, активные за последние 5 минут, число конфигов и хеш коммита. Интерфейс обновляется каждые 3 секунды; блоки конфига подсвечиваются, Copy копирует чистый текст.
+## Relay — при необходимости
 
-`Sent` — отправка ожидает подтверждения; `Received` — подтверждён хеш или применение; `Error` — ошибка Alloy. `Last synced` фиксирует подтверждение версии, но совпадение хешей само по себе не означает `APPLIED`. Состояние сбрасывается при перезапуске.
+На сервере ретранслятора создайте `.env` с адресом Hub:
 
-Основные GET API: `/api/state`, `/api/config/{name}`, `/api/collector/{id}/config` (также `?format=json`), `/api/collector/{id}/effective-config`. `/healthz` проверяет процесс; `/api/relay` доступен в режиме ретранслятора.
-
-Ретранслятор передаёт конфиги и отчёты, а не телеметрию. При временном сбое upstream выдаёт кеш с учётом `RELAY_CACHE_MAX_AGE`; ошибки доступа не маскируются кешем. Каждый опрос повторяет попытку upstream. Дисковый кеш переживает перезапуск, неотправленные отчёты в памяти — нет.
-
-## Безопасность и разработка
-
-- Встроенной аутентификации и TLS нет: ограничьте доступ сетью или reverse proxy с TLS и аутентификацией. Клиентские ID и атрибуты не подтверждают личность.
-- Не храните ключи в `.alloy`: API и кеш содержат полный текст. Читайте секреты на хосте Alloy через `local.file` с `is_secret = true`.
-- Для разработки нужен Go 1.26+: `go test ./...`, `go test -race ./...`, `go vet ./...`, `go run golang.org/x/vuln/cmd/govulncheck@latest ./...`.
-
----
-
-## 🚀 Быстрое знакомство
-
-> [!TIP]
-> **Запустите Hub без репозитория и коллекторов.** Нужны Docker с Compose и терминал в каталоге проекта. Таблицы сначала будут пустыми.
+```dotenv
+UPSTREAM_URL=http://hub-server:8081
+```
 
 ```bash
-mkdir -p ../alloy-configs-demo
-CONFIG_SOURCE_DIR=../alloy-configs-demo HUB_BIND_ADDRESS=127.0.0.1 docker compose --profile hub up -d --build
+docker compose --profile relay up -d --build
 ```
 
-<details>
-<summary><strong>PowerShell</strong></summary>
+В `remotecfg` на коллекторах укажите адрес ретранслятора: `url = "http://relay-server:8082"`. При временной недоступности Hub Relay отдаёт последний сохранённый конфиг. Кеш переживает перезапуск.
 
-```powershell
-New-Item -ItemType Directory -Path ../alloy-configs-demo -Force | Out-Null
-$env:CONFIG_SOURCE_DIR = "../alloy-configs-demo"
-$env:HUB_BIND_ADDRESS = "127.0.0.1"
-docker compose --profile hub up -d --build
-```
+## Дополнительно
 
-</details>
-
-**Открыть → [http://localhost:8081](http://localhost:8081)**
-
-Логи: `docker compose --profile hub logs -f alloy_configuration_hub`
-
-Остановить: `docker compose --profile hub down`
+- Для тестового Alloy в том же Compose: `docker compose --profile hub --profile alloy up -d --build`. Он использует готовый `configs/collector/config.alloy`; настройки — в [.env.example](.env.example). Сбор метрик хоста через cAdvisor рассчитан на Linux.
+- По умолчанию используется `./configs`. Другой каталог при необходимости задаётся через `CONFIG_SOURCE_DIR` в `.env`; остальные настройки портов и кеша также перечислены в [.env.example](.env.example).
+- В интерфейсе доступны светлая и тёмная темы, просмотр и копирование конфигов. `Sent` — ожидается подтверждение, `Received` — конфиг подтверждён, `Error` — ошибка применения. Отключённый коллектор остаётся неактивным 5 минут, затем исчезает; без явного отключения неактивность определяется после 5 минут без запросов.
+- Встроенной аутентификации и TLS нет: размещайте Hub в закрытой сети или за защищённым reverse proxy. Секреты храните на хостах Alloy, а не в раздаваемых конфигах.
+- Разработка: Go 1.26+, `go test ./...`, `go test -race ./...`, `go vet ./...`.
