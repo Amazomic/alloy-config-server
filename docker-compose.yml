@@ -3,8 +3,9 @@ services:
   alloy_configuration_hub:
     profiles: [hub]
     image: alloy-configuration-hub:local
-    build: .
-    network: host
+    build:
+      context: .
+      network: host
     environment:
       CONFIG_DIR: /configs
       CONFIG_REVISION_DIR: /config-revision
@@ -30,8 +31,9 @@ services:
   alloy_config_relay:
     profiles: [relay]
     image: alloy-configuration-hub:local
-    build: .
-    network: host
+    build:
+      context: .
+      network: host
     environment:
       APP_MODE: relay
       RELAY_NAME: ${RELAY_NAME:-config-relay}
