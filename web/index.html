@@ -5,9 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Alloy Configuration Hub</title>
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
+<script>
+(()=>{
+  let theme;
+  try{theme=localStorage.getItem('theme')}catch{}
+  document.documentElement.dataset.theme=theme==='light'||theme==='dark'?theme:(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+})();
+</script>
 <style>
 :root{--bg:#fff;--fg:#1d2433;--mut:#6b7385;--line:#e3e6ee;--card:#f6f7fa;--scroll-thumb:#cbd0da;--scroll-thumb-hover:#aeb5c2;--ok:#188a4a;--warn:#b7791f;--bad:#c0392b;--acc:#3b5bdb;--focus-ring:rgba(59,91,219,.12)}
-@media (prefers-color-scheme:dark){:root{--bg:#14171f;--fg:#e4e7ef;--mut:#8f97aa;--line:#2a2f3c;--card:#1b1f2a;--scroll-thumb:#353b49;--scroll-thumb-hover:#454d5e;--ok:#4cc27f;--warn:#e0a640;--bad:#ef6b5c;--acc:#7f9bff;--focus-ring:rgba(127,155,255,.16)}}
+:root{color-scheme:light}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#14171f;--fg:#e4e7ef;--mut:#8f97aa;--line:#2a2f3c;--card:#1b1f2a;--scroll-thumb:#353b49;--scroll-thumb-hover:#454d5e;--ok:#4cc27f;--warn:#e0a640;--bad:#ef6b5c;--acc:#7f9bff;--focus-ring:rgba(127,155,255,.16)}
 *{box-sizing:border-box}
 *{scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent}
 *::-webkit-scrollbar{width:8px;height:8px}
@@ -41,7 +49,11 @@ code,pre,.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
 .tag{display:inline-block;padding:1px 7px;margin:1px 3px 1px 0;border-radius:10px;background:var(--card);border:1px solid var(--line);white-space:nowrap}
 .tag.attr{color:var(--acc);border-color:var(--acc);font-weight:600}
 .tag.attr-match{color:hsl(var(--attr-hue) 62% 34%);background:hsl(var(--attr-hue) 75% 94%);border-color:hsl(var(--attr-hue) 55% 75%);font-weight:600}
-@media (prefers-color-scheme:dark){.tag.attr-match{color:hsl(var(--attr-hue) 75% 78%);background:hsl(var(--attr-hue) 35% 20%);border-color:hsl(var(--attr-hue) 42% 42%)}}
+:root[data-theme="dark"] .tag.attr-match{color:hsl(var(--attr-hue) 75% 78%);background:hsl(var(--attr-hue) 35% 20%);border-color:hsl(var(--attr-hue) 42% 42%)}
+.theme-sun{display:none}
+:root[data-theme="dark"] .theme-sun{display:block}
+:root[data-theme="dark"] .theme-moon{display:none}
+.collector-inactive{color:var(--mut)}
 .age{white-space:nowrap}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--mut)}
 .ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
@@ -100,7 +112,7 @@ td .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 button:disabled{opacity:.45;cursor:default}
 #cfg th:nth-child(1){width:22%}#cfg th:nth-child(2){width:25%}#cfg th:nth-child(3){width:8%}
 #cfg th:nth-child(4){width:16%}#cfg th:nth-child(5){width:11%}#cfg th:nth-child(6){width:8%}#cfg th:nth-child(7){width:10%}
-#ev th:nth-child(1){width:12%}#ev th:nth-child(2){width:14%}#ev th:nth-child(3){width:22%}#ev th:nth-child(4){width:52%}
+#ev th:nth-child(1){width:20%}#ev th:nth-child(2){width:14%}#ev th:nth-child(3){width:20%}#ev th:nth-child(4){width:46%}
 .tag{margin:0 4px 0 0;padding:1px 6px;border-radius:5px;font-size:11px;line-height:18px}
 .age,td:nth-last-child(2){font-variant-numeric:tabular-nums}
 input,button.btn{min-height:var(--control);padding:5px 8px;border-radius:var(--radius)}
@@ -139,6 +151,10 @@ button:disabled{opacity:.45;cursor:default}
       <span class="header-stat" title="Unique relay names and addresses seen polling in the last 5 minutes; nearest relay in a chain">Connected relays <b id="connected-relays">—</b></span>
     </div>
     <div id="config-revision" class="revision-badge" aria-live="polite"></div>
+    <button id="theme-toggle" class="icon-button" type="button" aria-label="Switch to dark theme" title="Switch to dark theme">
+      <svg class="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
+      <svg class="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z"/></svg>
+    </button>
   </div>
 </header>
 <h2>Alloy Collectors</h2>
@@ -167,19 +183,31 @@ button:disabled{opacity:.45;cursor:default}
 </dialog>
 <script>
 const $=id=>document.getElementById(id);
+function updateThemeButton(){
+  const label=document.documentElement.dataset.theme==='dark'?'Switch to light theme':'Switch to dark theme';
+  $('theme-toggle').setAttribute('aria-label',label);
+  $('theme-toggle').title=label;
+}
+$('theme-toggle').addEventListener('click',()=>{
+  const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';
+  document.documentElement.dataset.theme=theme;
+  try{localStorage.setItem('theme',theme)}catch{}
+  updateThemeButton();
+});
+updateThemeButton();
+const formatEventTime=value=>{
+  const date=new Date(value),pad=n=>String(n).padStart(2,'0');
+  if(Number.isNaN(date.getTime()))return '—';
+  return `${date.getDate()}.${pad(date.getMonth()+1)}.${pad(date.getFullYear()%100)} ${pad(date.getHours())}.${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const highlightSubstitutions=s=>esc(s).replace(/\{\{name\}\}/g,'<mark class="substitution" title="Uses the name attribute, falling back to id">$&</mark>');
 const formatAgo=t=>{if(!t||t.startsWith('0001'))return '—';const s=Math.max(0,(Date.now()-new Date(t))/1000);
   if(s<60)return Math.round(s)+'s ago';if(s<3600)return Math.round(s/60)+'m ago';if(s<86400)return Math.round(s/3600)+'h ago';return Math.round(s/86400)+'d ago'};
 const ago=t=>`<span class="age" data-time="${esc(t)}">${formatAgo(t)}</span>`;
-const collectorAgeClass=t=>{const age=(Date.now()-new Date(t))/1000;return age<300?'ok':age<1800?'warn':'bad'};
 function updateAges(){
   if(document.hidden)return;
   document.querySelectorAll('.age').forEach(el=>{const text=formatAgo(el.dataset.time);if(el.textContent!==text)el.textContent=text});
-  document.querySelectorAll('.collector-age').forEach(el=>{
-    const cls=collectorAgeClass(el.dataset.time);
-    if(!el.classList.contains(cls)){el.classList.remove('ok','warn','bad');el.classList.add(cls)}
-  });
 }
 const tags=o=>Object.entries(o||{}).map(([k,v])=>`<span class="tag">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="sub">—</span>';
 const attributeTags=(o,selectors,selectorColors)=>Object.entries(o||{}).map(([k,v])=>{
@@ -274,7 +302,7 @@ async function load(){
   const eventsKey=JSON.stringify(evs.slice(0,100));
   if(previousSections.events!==eventsKey){
   updateTable('ev',evs.length?`<tr><th>Time</th><th>Type</th><th>Alloy</th><th>Message</th></tr>`+
-    evs.slice(0,100).map((e,index)=>`<tr data-key="${esc(JSON.stringify([e.time,e.type,e.collector,e.message,index]))}"><td class="mono" title="${esc(e.time)}">${new Date(e.time).toLocaleTimeString('en-US')}</td><td class="${evColor[e.type]||''}">${esc(e.type)}</td><td>${esc(e.collector)}</td><td class="mono">${esc(e.message)}</td></tr>`).join('')
+    evs.slice(0,100).map((e,index)=>`<tr data-key="${esc(JSON.stringify([e.time,e.type,e.collector,e.message,index]))}"><td class="mono" title="${esc(e.time)}">${formatEventTime(e.time)}</td><td class="${evColor[e.type]||''}">${esc(e.type)}</td><td>${esc(e.collector)}</td><td class="mono">${esc(e.message)}</td></tr>`).join('')
     :'<tr data-key="empty"><td class="empty" colspan="4">No events</td></tr>');
   previousSections.events=eventsKey;
   }
@@ -332,16 +360,16 @@ function renderCollectors(cols,cfgs){
     popularity(b)-popularity(a)||a.id.localeCompare(b.id));
   updateTable('col',sortedCols.length?`<tr><th>ID</th><th>Attributes</th><th>Hash (Alloy → Server)</th><th>Status</th><th>Last seen</th><th>Last synced</th><th>Polls</th><th>Config</th></tr>`+
     sortedCols.map(c=>{
-      const cls=!c.registered&&c.polls===0?'warn':collectorAgeClass(c.last_seen);
+      const cls=c.active?'ok':'';
       const delivery=configDeliveryState(c);
       const inSync=delivery.key==='received';
       const matchedSelectors=new Set(cfgs
         .filter(cfg=>(c.configs||[]).includes(cfg.name)&&!cfg.error)
         .flatMap(cfg=>Object.entries(cfg.selector||{}).map(([key,value])=>JSON.stringify([key,value]))));
-      return `<tr data-key="${esc(c.id)}"><td><div class="collector-identity"><span class="dot ${cls}${c.registered||c.polls!==0?' collector-age':''}"${c.registered||c.polls!==0?` data-time="${esc(c.last_seen)}"`:''}></span><div class="collector-details"><b class="collector-id" title="${esc(c.id)}">${esc(c.id)}</b>${c.name&&c.name!==c.id?`<div class="sub" title="${esc(c.name)}">${esc(c.name)}</div>`:''}${c.remote_addr?`<div class="sub mono" title="${esc(c.remote_addr)}">${esc(c.remote_addr)}</div>`:''}</div></div></td>
+      return `<tr data-key="${esc(c.id)}"><td class="${c.active?'':'collector-inactive'}"><div class="collector-identity"><span class="dot ${cls}" title="${c.active?'Active':'Inactive'}"></span><div class="collector-details"><b class="collector-id" title="${esc(c.id)}">${esc(c.id)}</b>${c.name&&c.name!==c.id?`<div class="sub" title="${esc(c.name)}">${esc(c.name)}</div>`:''}${c.remote_addr?`<div class="sub mono" title="${esc(c.remote_addr)}">${esc(c.remote_addr)}</div>`:''}</div></div></td>
       <td class="attributes-cell"><div class="attribute-list">${attributeTags(c.attributes,matchedSelectors,selectorColors)}</div></td>
       <td class="mono ${inSync?'ok':'warn'}">${esc((c.client_hash||'∅').slice(0,8))} → ${esc((c.server_hash||'').slice(0,8))}</td>
-      <td class="${c.status==='failed'?'bad':''}">${esc(c.status||(delivery.key==='received'?'received':'—'))}<div class="sub bad">${esc(c.status_error)}</div></td>
+      <td class="${!c.active?'collector-inactive':c.status==='failed'?'bad':''}">${c.active?esc(c.status||(delivery.key==='received'?'received':'—')):'Inactive'}<div class="sub bad">${c.active?esc(c.status_error):''}</div></td>
       <td>${ago(c.last_seen)}</td><td title="Last confirmation of configuration receipt or application">${ago(c.last_synced)}</td><td>${c.polls}</td>
       <td><button class="btn config-state ${delivery.key}" type="button" data-collector-config="${esc(c.id)}" ${c.polls?'':'disabled'} title="${esc(delivery.description)}" aria-label="View config for ${esc(c.id)}: ${delivery.label}">${configIcon}<span>${delivery.label}</span></button></td></tr>`}).join('')
     :'<tr data-key="empty"><td class="empty" colspan="8">No Alloy collectors have connected yet</td></tr>');

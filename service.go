@@ -23,6 +23,7 @@ type Collector struct {
 	Attributes          map[string]string `json:"attributes"`
 	RemoteAddr          string            `json:"remote_addr"`
 	Registered          bool              `json:"registered"`
+	Active              bool              `json:"active"`
 	FirstSeen           time.Time         `json:"first_seen"`
 	LastSeen            time.Time         `json:"last_seen"`
 	LastSynced          time.Time         `json:"last_synced,omitempty"` // подтверждение получения текущей версии
@@ -41,6 +42,7 @@ type Collector struct {
 	configParts         []ConfigPart
 	effectiveConfig     []EffectiveConfigFile
 	disconnected        bool
+	disconnectedAt      time.Time
 }
 
 // Config bodies are served on demand, never included in polling snapshots.
@@ -76,6 +78,8 @@ type Server struct {
 }
 
 const maxEvents = 300
+const collectorActivityWindow = 5 * time.Minute
+const collectorInactiveRetention = 5 * time.Minute
 
 func NewServer(store *Store, log *slog.Logger, logIdle bool) *Server {
 	return &Server{store: store, log: log, logIdle: logIdle, collectors: map[string]*Collector{}, relays: map[string]time.Time{}}
@@ -85,7 +89,7 @@ func NewServer(store *Store, log *slog.Logger, logIdle bool) *Server {
 func (s *Server) activityCounts() (collectors, relays int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cutoff := time.Now().Add(-5 * time.Minute)
+	cutoff := time.Now().Add(-collectorActivityWindow)
 	for _, c := range s.collectors {
 		if !c.disconnected && c.LastSeen.After(cutoff) {
 			collectors++
@@ -225,6 +229,7 @@ func (s *Server) GetConfig(ctx context.Context, req *connect.Request[collectorv1
 	c.Polls++
 	c.LastSeen = time.Now()
 	c.disconnected = false
+	c.disconnectedAt = time.Time{}
 	if relayHops > 0 {
 		s.relays[relayName+"\x00"+relayAddr] = c.LastSeen
 	}
@@ -371,6 +376,7 @@ func (s *Server) RegisterCollector(ctx context.Context, req *connect.Request[col
 	c := s.get(m.Id)
 	c.Name, c.Registered, c.RemoteAddr, c.Attributes, c.LastSeen = m.Name, true, addr, attrs, time.Now()
 	c.disconnected = false
+	c.disconnectedAt = time.Time{}
 	s.addEvent("register", m.Id, "registered as "+m.Name)
 	s.mu.Unlock()
 
@@ -383,6 +389,9 @@ func (s *Server) UnregisterCollector(ctx context.Context, req *connect.Request[c
 	s.mu.Lock()
 	if c, ok := s.collectors[id]; ok {
 		c.Registered = false
+		if !c.disconnected {
+			c.disconnectedAt = time.Now()
+		}
 		c.disconnected = true
 	}
 	s.addEvent("unregister", id, "unregistered (alloy shutting down)")
@@ -397,8 +406,18 @@ func (s *Server) snapshot() (collectors []Collector, events []Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	collectors = make([]Collector, 0, len(s.collectors))
+	now := time.Now()
 	for _, c := range s.collectors {
-		collectors = append(collectors, *c)
+		inactiveAt := c.LastSeen.Add(collectorActivityWindow)
+		if c.disconnected && c.disconnectedAt.Before(inactiveAt) {
+			inactiveAt = c.disconnectedAt
+		}
+		if !now.Before(inactiveAt.Add(collectorInactiveRetention)) {
+			continue
+		}
+		copy := *c
+		copy.Active = !c.disconnected && now.Before(inactiveAt)
+		collectors = append(collectors, copy)
 	}
 	sort.Slice(collectors, func(i, j int) bool { return collectors[i].ID < collectors[j].ID })
 	events = make([]Event, len(s.events))
