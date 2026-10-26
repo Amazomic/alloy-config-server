@@ -4,6 +4,7 @@ services:
     profiles: [hub]
     image: alloy-configuration-hub:local
     build: .
+    network: host
     environment:
       CONFIG_DIR: /configs
       CONFIG_REVISION_DIR: /config-revision
@@ -30,6 +31,7 @@ services:
     profiles: [relay]
     image: alloy-configuration-hub:local
     build: .
+    network: host
     environment:
       APP_MODE: relay
       RELAY_NAME: ${RELAY_NAME:-config-relay}
